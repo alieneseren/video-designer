@@ -1,0 +1,20 @@
+{
+  "channel_id": "tacticallcrayon",
+  "channel_name": "Tactical Crayon",
+  "topic_category": "crayon_combat",
+  "role_name": "Tactical Scribe",
+  "description": "Charismatic military contractor / tactical skeptic with olive operator cap and giant wax crayon.",
+  "cap_color_rgb": [
+    59,
+    78,
+    52
+  ],
+  "badge_color_rgb": [
+    234,
+    179,
+    8
+  ],
+  "prop": "tactical_crayon",
+  "avatar_path": "/Users/alienes/yt-oto-video/files/assets/characters/tacticallcrayon/channel_avatar.png",
+  "sprite_dir": "/Users/alienes/yt-oto-video/files/assets/characters/tacticallcrayon"
+}

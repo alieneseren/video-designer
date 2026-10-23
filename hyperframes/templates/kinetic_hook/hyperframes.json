@@ -1,0 +1,6 @@
+{
+  "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
+  "name": "kinetic_hook",
+  "resolution": "portrait",
+  "fps": 30
+}

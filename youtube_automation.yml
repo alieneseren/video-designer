@@ -1,0 +1,117 @@
+name: Daily YouTube Automation
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # Her gün UTC 06:00 (TR 09:00)
+  workflow_dispatch:        # Manuel tetikleme (GitHub arayüzünden)
+    inputs:
+      channel_id:
+        description: "Sadece bu kanalı çalıştır (boş = hepsi)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Dry run (yükleme yapma)"
+        type: boolean
+        default: false
+
+env:
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  NASA_API_KEY: ${{ secrets.NASA_API_KEY }}
+  OUTPUT_DIR: output
+  CREDENTIALS_DIR: credentials
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # ── Kod checkout ──────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Python kurulum ────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── Sistem bağımlılıkları (FFmpeg vs) ────────────────
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+
+      # ── Python bağımlılıkları ─────────────────────────────
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      # ── Klasörler ─────────────────────────────────────────
+      - name: Create directories
+        run: mkdir -p output credentials config
+
+      # ── Kanal kimlik bilgilerini geri yükle ──────────────
+      # Her kanal için ayrı bir GitHub Secret tanımlanır:
+      #   CH_001_CLIENT_SECRET  → credentials/ch_001_client_secret.json
+      #   CH_001_TOKEN          → credentials/ch_001_token.json
+      #   CH_002_CLIENT_SECRET  → credentials/ch_002_client_secret.json
+      #   CH_002_TOKEN          → credentials/ch_002_token.json
+      - name: Restore channel credentials
+        env:
+          CHANNELS_JSON: ${{ secrets.CHANNELS_CONFIG }}
+        run: |
+          echo "$CHANNELS_JSON" > config/channels.json
+          # Dinamik olarak her kanalın tokenını yaz
+          python3 - << 'EOF'
+          import json, os
+          from pathlib import Path
+
+          channels_raw = os.environ.get("CHANNELS_JSON", "{}")
+          try:
+              data = json.loads(channels_raw)
+          except:
+              data = {"channels": []}
+
+          for ch in data.get("channels", []):
+              cid = ch["channel_id"].upper().replace("-", "_")
+              secret_key = f"{cid}_CLIENT_SECRET"
+              token_key  = f"{cid}_TOKEN"
+
+              secret_val = os.environ.get(secret_key, "")
+              token_val  = os.environ.get(token_key, "")
+
+              cid_lower = ch["channel_id"]
+              if secret_val:
+                  Path(f"credentials/{cid_lower}_client_secret.json").write_text(secret_val)
+              if token_val:
+                  Path(f"credentials/{cid_lower}_token.json").write_text(token_val)
+              print(f"Kimlik bilgileri yüklendi: {cid_lower}")
+          EOF
+
+      # ── Ana script ────────────────────────────────────────
+      - name: Run YouTube Automation
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.channel_id }}" ]; then
+            ARGS="--channel ${{ github.event.inputs.channel_id }}"
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          python src/main.py $ARGS
+
+      # ── Log kaydet ────────────────────────────────────────
+      - name: Upload run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-logs-${{ github.run_number }}
+          path: output/*.json
+          retention-days: 30
+
+      # ── Token yenileme (opsiyonel: Secret'ı güncelle) ────
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::YouTube otomasyon başarısız oldu! Log'ları kontrol et."

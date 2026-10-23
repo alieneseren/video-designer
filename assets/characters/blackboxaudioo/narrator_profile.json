@@ -1,0 +1,20 @@
+{
+  "channel_id": "blackboxaudioo",
+  "channel_name": "Black Box Audio",
+  "topic_category": "aviation",
+  "role_name": "Flight Captain",
+  "description": "Veteran commercial & test pilot with captain's cap, gold braids, and aviator headset.",
+  "cap_color_rgb": [
+    15,
+    23,
+    42
+  ],
+  "badge_color_rgb": [
+    56,
+    189,
+    248
+  ],
+  "prop": "flight_kneeboard",
+  "avatar_path": "/Users/alienes/yt-oto-video/files/assets/characters/blackboxaudioo/channel_avatar.png",
+  "sprite_dir": "/Users/alienes/yt-oto-video/files/assets/characters/blackboxaudioo"
+}

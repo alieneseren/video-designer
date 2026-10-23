@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <title>Kinetic Hook</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Syne:wght@700;800&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html, body {
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background-color: #070709;
+        font-family: 'Syne', sans-serif;
+        color: #ffffff;
+      }
+      .stage {
+        position: relative;
+        width: 1080px;
+        height: 1920px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 80px;
+        background: radial-gradient(circle at 50% 35%, rgba(121, 40, 202, 0.35) 0%, rgba(7, 7, 9, 0.95) 70%);
+      }
+      .grid-lines {
+        position: absolute;
+        inset: 0;
+        background-image: 
+          linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        background-size: 80px 80px;
+        pointer-events: none;
+      }
+      .glow-orb {
+        position: absolute;
+        width: 500px;
+        height: 500px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(0, 245, 212, 0.25) 0%, rgba(0, 0, 0, 0) 70%);
+        top: 25%;
+        left: 25%;
+        filter: blur(60px);
+        pointer-events: none;
+      }
+      .badge {
+        font-family: 'Inter', sans-serif;
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+        color: #00f5d4;
+        background: rgba(0, 245, 212, 0.1);
+        border: 1px solid rgba(0, 245, 212, 0.4);
+        padding: 12px 28px;
+        border-radius: 9999px;
+        margin-bottom: 50px;
+        box-shadow: 0 0 25px rgba(0, 245, 212, 0.2);
+        backdrop-filter: blur(10px);
+      }
+      .title-container {
+        width: 100%;
+        text-align: center;
+        perspective: 1000px;
+      }
+      .title {
+        font-size: 84px;
+        font-weight: 800;
+        line-height: 1.08;
+        letter-spacing: -0.02em;
+        text-transform: uppercase;
+        background: linear-gradient(180deg, #ffffff 30%, #a1a1aa 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+      }
+      .title span.highlight {
+        background: linear-gradient(135deg, #00f5d4 0%, #7928ca 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        display: inline-block;
+      }
+      .subtitle {
+        font-family: 'Inter', sans-serif;
+        font-size: 36px;
+        font-weight: 500;
+        color: #d4d4d8;
+        margin-top: 40px;
+        max-width: 850px;
+        text-align: center;
+        line-height: 1.4;
+        opacity: 0.9;
+      }
+      .accent-line {
+        width: 120px;
+        height: 6px;
+        background: linear-gradient(90deg, #00f5d4, #7928ca);
+        border-radius: 4px;
+        margin-top: 40px;
+      }
+      .timer-bar {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        height: 10px;
+        width: 100%;
+        background: linear-gradient(90deg, #00f5d4, #7928ca);
+        transform-origin: left center;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      class="stage"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="4"
+      data-width="1080"
+      data-height="1920"
+    >
+      <div class="grid-lines"></div>
+      <div class="glow-orb" id="glow"></div>
+
+      <div class="badge" id="badge-el">ÖZEL BÖLÜM</div>
+
+      <div class="title-container">
+        <h1 class="title" id="title-el">
+          BU GERÇEĞİ <span class="highlight">HİÇ KİMSE</span> BİLMİYORDU
+        </h1>
+      </div>
+
+      <p class="subtitle" id="subtitle-el">
+        Kayıtları incelediğimizde ortaya çıkan inanılmaz detaylar...
+      </p>
+
+      <div class="accent-line" id="line-el"></div>
+      <div class="timer-bar" id="timer-el"></div>
+    </div>
+
+    <script>
+      // Load variables if passed via CLI or script
+      try {
+        const v = (window.__hyperframes && typeof window.__hyperframes.getVariables === "function")
+          ? window.__hyperframes.getVariables()
+          : {};
+        if (v.badge) document.getElementById("badge-el").textContent = v.badge;
+        if (v.title) {
+          const tEl = document.getElementById("title-el");
+          // If title has a pipe '|' or words, highlight the last word
+          const words = v.title.trim().split(" ");
+          if (words.length > 2) {
+            const last = words.pop();
+            tEl.innerHTML = words.join(" ") + ' <span class="highlight">' + last + '</span>';
+          } else {
+            tEl.textContent = v.title;
+          }
+        }
+        if (v.subtitle) document.getElementById("subtitle-el").textContent = v.subtitle;
+      } catch (e) {
+        console.error("Variable error", e);
+      }
+
+      // GSAP Deterministic Timeline
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      // 0.0s - 0.6s: Badge & glow in
+      tl.from("#glow", { scale: 0.5, opacity: 0, duration: 1.2, ease: "power2.out" }, 0);
+      tl.from("#badge-el", { y: -40, opacity: 0, duration: 0.6, ease: "back.out(1.7)" }, 0.1);
+
+      // 0.3s - 1.2s: Title explosive kinetic scale
+      tl.from("#title-el", {
+        scale: 0.82,
+        y: 60,
+        opacity: 0,
+        duration: 0.8,
+        ease: "expo.out"
+      }, 0.3);
+
+      // 0.6s - 1.4s: Subtitle & Line reveal
+      tl.from("#subtitle-el", { y: 30, opacity: 0, duration: 0.7, ease: "power3.out" }, 0.6);
+      tl.from("#line-el", { scaleX: 0, duration: 0.8, ease: "expo.out" }, 0.7);
+
+      // 0.0s - 4.0s: Progress bar
+      tl.fromTo("#timer-el", { scaleX: 0 }, { scaleX: 1, duration: 4.0, ease: "none" }, 0);
+
+      // 3.4s - 4.0s: Cinematic zoom-out transition for smooth cut into next scene
+      tl.to("#root", {
+        scale: 1.05,
+        opacity: 0,
+        duration: 0.6,
+        ease: "power2.in"
+      }, 3.4);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
