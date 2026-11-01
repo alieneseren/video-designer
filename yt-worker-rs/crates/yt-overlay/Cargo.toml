@@ -1,0 +1,13 @@
+[package]
+name = "yt-overlay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+yt-core = { path = "../yt-core" }
+tiny-skia.workspace = true
+image.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true

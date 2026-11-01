@@ -1,0 +1,26 @@
+[package]
+name = "yt-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "yt-worker"
+path = "src/main.rs"
+
+[dependencies]
+yt-core = { path = "../yt-core" }
+yt-media-core = { path = "../yt-media-core" }
+yt-fetcher = { path = "../yt-fetcher" }
+yt-overlay = { path = "../yt-overlay" }
+yt-ffmpeg = { path = "../yt-ffmpeg" }
+tokio.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+image.workspace = true
+walkdir.workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "yt-media-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+yt-core = { path = "../yt-core" }
+image.workspace = true
+serde.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
