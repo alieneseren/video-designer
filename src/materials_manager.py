@@ -39,7 +39,12 @@ def _slugify(text: str, max_len: int = 30) -> str:
 
 class MaterialsManager:
     def __init__(self, output_dir: Optional[str] = None):
-        self.output_dir = Path(output_dir or settings_mgr.get("output_dir", "output"))
+        out_raw = output_dir or settings_mgr.get("output_dir", "output")
+        p = Path(out_raw)
+        if not p.is_absolute():
+            self.output_dir = Path(__file__).resolve().parent.parent / p
+        else:
+            self.output_dir = p
 
     def _resolve_target(self, channel_id: str) -> tuple[bool, str, Path]:
         """
@@ -157,6 +162,7 @@ class MaterialsManager:
             "status": "ready",  # ready | producing | in_cloud_queue | produced | downloaded | failed
             "target_env": target_env,
             "notes": notes,
+            "bgm_timeline": script.get("bgm_timeline") if isinstance(script, dict) else None,
             "script": script,
             "scenes": scenes,
             "images": saved_images,

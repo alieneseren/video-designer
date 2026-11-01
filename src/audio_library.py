@@ -97,8 +97,49 @@ TRACKS = [
         "artist": "Aakash Gandhi",
         "url": "https://www.youtube.com/watch?v=8mG_JjL1P7A",
         "mood": "Dramatic / Tension",
-        "desc": "Gerilimli, merak uyandırıcı Reddit hikayeleri için arka plan",
-        "keywords": ["gizemli", "gerilim", "korkunç", "şok", "korku", "creepy", "paranormal", "karanlık sır"]
+        "desc": "Gerilimli, merak uyandırıcı hava ve hikaye anlatımları için arka plan",
+        "keywords": ["gizemli", "gerilim", "korkunç", "şok", "korku", "creepy", "paranormal", "karanlık sır", "kriz", "acil durum"],
+        "attribution_free": True
+    },
+    {
+        "id": "timeturner",
+        "title": "Timeturner",
+        "artist": "Patrick Patrikios",
+        "url": "https://www.youtube.com/watch?v=5z6yA8h3R1U",
+        "mood": "Ticking Clock / Countdown Urgency",
+        "desc": "Zamanla yarış, acil durum ve sayaç sahneleri için YouTube Audio Library atıf gerektirmeyen parça",
+        "keywords": ["sayaç", "countdown", "zaman", "dakika", "hız", "alarm", "ticking", "urgent", "kriz", "flameout"],
+        "attribution_free": True
+    },
+    {
+        "id": "underworld",
+        "title": "Underworld",
+        "artist": "Myuu",
+        "url": "https://www.youtube.com/watch?v=kY7wV2Y8mNo",
+        "mood": "Dark Mystery / Disaster / Catastrophe",
+        "desc": "Karanlık, kaza kırım ve dramatik felaket sahneleri için atıf gerektirmeyen atmosferik müzik",
+        "keywords": ["felaket", "kaza", "düşüş", "ölüm", "enkaz", "karanlık", "gizem", "disaster", "crash"],
+        "attribution_free": True
+    },
+    {
+        "id": "borderless",
+        "title": "Borderless",
+        "artist": "Aakash Gandhi",
+        "url": "https://www.youtube.com/watch?v=r3_7zZ5b2wQ",
+        "mood": "Deep Investigative / Documentary",
+        "desc": "Resmi kaza tahkikatı, NTSB raporları ve derin teknik analizler için sakin piyano & yaylılar",
+        "keywords": ["tahkikat", "ntsb", "ansv", "kara kutu", "rapor", "analiz", "inceleme", "investigation"],
+        "attribution_free": True
+    },
+    {
+        "id": "sneaky_snitch",
+        "title": "Sneaky Snitch",
+        "artist": "Kevin MacLeod",
+        "url": "https://www.youtube.com/watch?v=-SjOkb3kVgI",
+        "mood": "Satirical / Cunning Humor",
+        "desc": "Askeri ihale hicvi, şirket kurnazlığı ve çöp adam esprileri için telifsiz eğlenceli parça",
+        "keywords": ["hiciv", "komik", "para", "ceo", "skandal", "ihale", "cunning", "satire", "stealth"],
+        "attribution_free": True
     }
 ]
 
@@ -143,6 +184,21 @@ def get_track_by_id(track_id: str) -> dict | None:
             return t
     return None
 
+def get_attribution_free_tracks() -> list[dict]:
+    """Tüm atıf gerektirmeyen (YouTube Audio Library No-Attribution) müzikleri listeler."""
+    return [
+        {
+            "id": t["id"],
+            "title": t["title"],
+            "artist": t["artist"],
+            "mood": t["mood"],
+            "desc": t.get("desc", ""),
+            "attribution": "No attribution required (Atıf gerekmez)",
+            "attribution_free": True
+        }
+        for t in TRACKS
+    ]
+
 def download_track(track_id: str, target_dir: Path) -> Path | None:
     """yt-dlp kullanarak parçayı mp3 olarak indirir veya yerel önbellekten döndürür."""
     track = get_track_by_id(track_id)
@@ -171,7 +227,7 @@ def download_track(track_id: str, target_dir: Path) -> Path | None:
         Path("audio_cache"),
     ]
     for d in candidate_dirs:
-        for fname in [f"{track_id}.mp3", "lofi_storyteller.mp3", f"{track_id}.wav"]:
+        for fname in [f"{track_id}.mp3", f"{track_id}.wav"]:
             cand = d / fname
             if cand.exists() and cand.stat().st_size > 10240:
                 print(f"[AUDIO-LIBRARY] Yerel önbellek bulundu: {cand}")
@@ -181,9 +237,10 @@ def download_track(track_id: str, target_dir: Path) -> Path | None:
     if not yt_dlp_bin.exists():
         yt_dlp_bin = "yt-dlp" # Fallback to global
         
-    # İndirme kaynakları: önce doğrudan arama terimi, sonra URL
-    search_query = f"ytsearch1:No copyright {track.get('title', '')} {track.get('mood', 'lofi')} background music story"
-    sources_to_try = [search_query, track.get("url", "")]
+    # İndirme kaynakları: önce doğrudan resmi Audio Library URL'si, sonra arama
+    direct_url = track.get("url", "")
+    search_query = f"ytsearch1:No copyright {track.get('title', '')} {track.get('mood', 'lofi')} background music"
+    sources_to_try = [direct_url, search_query]
     
     for source in sources_to_try:
         if not source:
@@ -215,5 +272,146 @@ def download_track(track_id: str, target_dir: Path) -> Path | None:
                     print(f"[AUDIO-LIBRARY] Son çare alternatif müzik: {any_mp3}")
                     return any_mp3
         
+    return None
+
+
+def parse_time_seconds(time_val) -> float:
+    """Parses '03:30', '03:30.5', 210, etc. into seconds as float."""
+    if time_val is None:
+        return 0.0
+    if isinstance(time_val, (int, float)):
+        return max(0.0, float(time_val))
+    val_str = str(time_val).strip()
+    if not val_str:
+        return 0.0
+    parts = val_str.split(":")
+    try:
+        if len(parts) == 1:
+            return max(0.0, float(parts[0]))
+        elif len(parts) == 2:
+            return max(0.0, int(parts[0]) * 60 + float(parts[1]))
+        elif len(parts) == 3:
+            return max(0.0, int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2]))
+    except Exception:
+        pass
+    return 0.0
+
+
+def build_timeline_bgm_track(
+    bgm_timeline: list[dict],
+    total_duration: float,
+    work_dir: Path,
+    base_volume: float = 0.08
+) -> Path | None:
+    """
+    Given a bgm_timeline list of segments (start_time, end_time, track_id),
+    downloads/loads each attribution-free track, creates faded audio segments,
+    and concatenates them into a single seamless wav file matching total_duration.
+    """
+    if not bgm_timeline or not isinstance(bgm_timeline, list) or total_duration <= 1.0:
+        return None
+
+    work_dir = Path(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    project_root = Path(__file__).resolve().parent.parent
+    cache_dir = project_root / "audio_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    segment_wavs = []
+    current_time = 0.0
+
+    for idx, seg in enumerate(bgm_timeline):
+        if not isinstance(seg, dict):
+            continue
+        start = parse_time_seconds(seg.get("start_time", current_time))
+        end = parse_time_seconds(seg.get("end_time", 0.0))
+
+        # If end is 0 or less than start, estimate from next or remaining
+        if end <= start:
+            if idx + 1 < len(bgm_timeline) and "start_time" in bgm_timeline[idx + 1]:
+                end = parse_time_seconds(bgm_timeline[idx + 1]["start_time"])
+            else:
+                end = total_duration
+
+        dur = max(1.0, end - start)
+        track_id = seg.get("track_id") or "lofi_storyteller"
+
+        track_path = download_track(track_id, cache_dir)
+        if not track_path or not Path(track_path).is_file():
+            track_path = download_track("lofi_storyteller", cache_dir)
+            if not track_path or not Path(track_path).is_file():
+                continue
+
+        seg_file = work_dir / f"bgm_seg_{idx:02d}.wav"
+        fade_dur = min(1.2, dur / 2.0)
+        fade_out_start = max(0.0, dur - fade_dur)
+
+        # Generate looped, faded segment
+        cmd = [
+            "ffmpeg", "-y",
+            "-stream_loop", "-1",
+            "-i", str(track_path),
+            "-t", f"{dur:.3f}",
+            "-af", f"afade=t=in:ss=0:d={fade_dur:.2f},afade=t=out:st={fade_out_start:.3f}:d={fade_dur:.2f},volume={base_volume:.4f}",
+            "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "2",
+            str(seg_file)
+        ]
+        try:
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            if seg_file.is_file() and seg_file.stat().st_size > 1024:
+                segment_wavs.append(seg_file)
+                current_time = end
+        except Exception as e:
+            print(f"[AUDIO-LIBRARY] BGM segment {idx} failed: {e}")
+
+    if not segment_wavs:
+        return None
+
+    # Check if we covered up to total_duration
+    if current_time < total_duration - 0.5 and segment_wavs:
+        remaining = total_duration - current_time
+        last_seg = bgm_timeline[-1] if bgm_timeline else {}
+        track_id = last_seg.get("track_id") or "borderless"
+        track_path = download_track(track_id, cache_dir)
+        if track_path and Path(track_path).is_file():
+            tail_file = work_dir / "bgm_seg_tail.wav"
+            fade_dur = min(1.2, remaining / 2.0)
+            fade_out_start = max(0.0, remaining - fade_dur)
+            cmd = [
+                "ffmpeg", "-y",
+                "-stream_loop", "-1",
+                "-i", str(track_path),
+                "-t", f"{remaining:.3f}",
+                "-af", f"afade=t=in:ss=0:d={fade_dur:.2f},afade=t=out:st={fade_out_start:.3f}:d={fade_dur:.2f},volume={base_volume:.4f}",
+                "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "2",
+                str(tail_file)
+            ]
+            try:
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+                if tail_file.is_file() and tail_file.stat().st_size > 1024:
+                    segment_wavs.append(tail_file)
+            except Exception:
+                pass
+
+    # Concat all segments into bgm_timeline_mixed.wav
+    concat_list = work_dir / "bgm_seg_list.txt"
+    concat_list.write_text("\n".join([f"file '{p.resolve()}'" for p in segment_wavs]), encoding="utf-8")
+    out_mixed = work_dir / "bgm_timeline_mixed.wav"
+
+    cmd_concat = [
+        "ffmpeg", "-y",
+        "-f", "concat", "-safe", "0",
+        "-i", str(concat_list),
+        "-c:a", "pcm_s16le",
+        str(out_mixed)
+    ]
+    try:
+        subprocess.run(cmd_concat, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        if out_mixed.is_file() and out_mixed.stat().st_size > 4096:
+            print(f"[AUDIO-LIBRARY] ✓ bgm_timeline başarıyla derlendi: {out_mixed} ({len(segment_wavs)} segment)")
+            return out_mixed
+    except Exception as e:
+        print(f"[AUDIO-LIBRARY] bgm_timeline concat failed: {e}")
+
     return None
 

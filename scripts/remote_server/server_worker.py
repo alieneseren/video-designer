@@ -503,16 +503,39 @@ def render_crayon_job(job_data: dict, work_dir: Path) -> Path:
     lang = (channel_config.get("language") or "en").lower()
 
     sys.path.insert(0, str(BASE_DIR))
-    from stickman_engine.crayon_generator import generate_crayon_video
+    from stickman_engine.crayon_generator import generate_crayon_video, get_audio_duration
 
     def synthesize_crayon_speech(text: str, language: str, output_path: str) -> str:
         language_key = (language or lang).split("-", 1)[0].lower()
         voice_config = VOICE_MAP.get(language_key, VOICE_MAP["en"])
-        generate_speech(text, voice_config["narrator"], output_path)
         audio_path = Path(output_path)
-        if not audio_path.is_file() or audio_path.stat().st_size < 1000:
-            raise RuntimeError(f"Edge TTS sahne sesini oluşturamadı: {audio_path.name}")
-        return str(audio_path)
+        for rate in ("+0%", "+10%", "+20%", "+30%", "+35%", "+40%", "+45%", "+50%", "+60%", "+70%", "+80%"):
+            generate_speech(text, voice_config["narrator"], output_path, rate=rate)
+            if not audio_path.is_file() or audio_path.stat().st_size < 1000:
+                raise RuntimeError(f"Edge TTS sahne sesini oluşturamadı: {audio_path.name}")
+            if 0 < get_audio_duration(str(audio_path)) <= 4.95:
+                return str(audio_path)
+        raise RuntimeError(
+            f"Crayon shot TTS sesi artan konuşma hızlarına rağmen 5 saniyeye sığmadı: "
+            f"{audio_path.name}"
+        )
+
+    # Otomatik Konuya Özel Görsel Araştırması & Üretimi
+    try:
+        from aviation_research_engine import AviationResearchEngine
+        engine = AviationResearchEngine()
+        cid = channel_config.get("channel_id") or "tacticallcrayon"
+        engine.research_material_dir(work_dir, channel_id=cid)
+        mat_json = work_dir / "material.json"
+        if mat_json.is_file():
+            with open(mat_json, "r", encoding="utf-8") as f_mat:
+                updated_mat = json.load(f_mat)
+            if updated_mat.get("images"):
+                job_data["custom_images"] = updated_mat["images"]
+            if updated_mat.get("script"):
+                script_data = updated_mat["script"]
+    except Exception as e_res:
+        print(f"[WORKER-CRAYON] Otomatik konu görsel araştırması uyarısı: {e_res}")
 
     result = generate_crayon_video(
         channel_config=channel_config,
@@ -2225,6 +2248,198 @@ def render_aviation_job(job_data: dict, work_dir: Path) -> Path:
 # ─────────────────────────────────────────────────────────────
 # 6. Genel / Diğer Konular Render Motoru
 # ─────────────────────────────────────────────────────────────
+def _has_per_scene_audio(custom_audios: dict, scene_count: int) -> bool:
+    scene_keys = {
+        str(key) for key in custom_audios
+        if re.fullmatch(r"scene_\d+", str(key))
+    }
+    numeric_keys = {
+        str(key) for key in custom_audios
+        if str(key).isdigit()
+    }
+    if scene_keys or len(numeric_keys) > 1:
+        return True
+    return scene_count == 1 and bool(numeric_keys)
+
+
+def _get_scene_audio_payload(custom_audios: dict, scene_index: int):
+    return custom_audios.get(f"scene_{scene_index}") or custom_audios.get(str(scene_index))
+
+
+def _allocate_legacy_scene_durations(scenes: list, total_duration: float) -> list[float]:
+    weights = [
+        max(1, len(str(scene.get("narration") or scene.get("text") or "").split()))
+        for scene in scenes
+    ]
+    total_weight = sum(weights)
+    if not total_weight:
+        return []
+    durations = [total_duration * weight / total_weight for weight in weights]
+    durations[-1] = max(0.0, total_duration - sum(durations[:-1]))
+    return durations
+
+
+def _probe_scene_audio_duration(audio_path: Path) -> float:
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(audio_path),
+        ],
+        capture_output=True, text=True, check=True,
+    )
+    duration = float(result.stdout.strip())
+    if duration <= 0:
+        raise RuntimeError(f"Sahne sesinin süresi geçersiz: {audio_path.name}")
+    return duration
+
+
+def _decode_scene_images(custom_images: dict, work_dir: Path) -> dict[int, Path]:
+    scene_images = {}
+    for key, value in custom_images.items():
+        match = re.fullmatch(r"(?:scene_)?(\d+)", str(key))
+        if not match or not value:
+            continue
+        image_path = work_dir / f"general_scene_image_{match.group(1)}"
+        try:
+            if isinstance(value, str) and value.startswith("data:image") and "," in value:
+                image_path.write_bytes(base64.b64decode(value.split(",", 1)[1]))
+            elif isinstance(value, str) and value.startswith(("http://", "https://")):
+                request = urllib.request.Request(value, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    image_path.write_bytes(response.read())
+            elif isinstance(value, str) and Path(value).is_file():
+                image_path = Path(value)
+            else:
+                continue
+            if image_path.is_file() and image_path.stat().st_size:
+                scene_images[int(match.group(1))] = image_path
+        except Exception as error:
+            print(f"[Worker-General] Görsel çözme uyarısı ({key}): {error}")
+    return scene_images
+
+
+def _render_scene_aligned_general(
+    job_data: dict,
+    script: dict,
+    scenes: list,
+    work_dir: Path,
+    lang: str,
+    voice_cfg: dict,
+    width: int,
+    height: int,
+) -> Path:
+    custom_audios = job_data.get("custom_audios") or {}
+    custom_images = job_data.get("custom_images") or {}
+    scene_images = _decode_scene_images(custom_images, work_dir) if isinstance(custom_images, dict) else {}
+    entries = []
+    for index, scene in enumerate(scenes):
+        text = str(scene.get("narration") or scene.get("text") or "").strip()
+        if text:
+            entries.append((index, text, _get_scene_audio_payload(custom_audios, index)))
+    if not entries:
+        raise RuntimeError("Genel video için seslendirilecek sahne bulunamadı.")
+
+    missing_audio = []
+    audio_paths = {}
+    for index, _text, audio_payload in entries:
+        if not audio_payload:
+            missing_audio.append(index)
+            continue
+        source_path = work_dir / f"general_scene_{index}_custom.bin"
+        if isinstance(audio_payload, str) and "," in audio_payload and audio_payload.split(",", 1)[0].startswith("data:audio"):
+            audio_payload = audio_payload.split(",", 1)[1]
+        source_path.write_bytes(base64.b64decode(audio_payload))
+        audio_paths[index] = source_path
+
+    if missing_audio:
+        texts_by_index = {index: text for index, text, _payload in entries}
+        tts_engine = str(job_data.get("tts_engine") or "kokoro").lower()
+        kokoro_voice = str(job_data.get("kokoro_voice") or "am_michael")
+        use_kokoro = tts_engine == "kokoro" and resolve_kokoro_voice(lang, kokoro_voice)
+        if use_kokoro:
+            wav_paths = [work_dir / f"general_scene_{index}.wav" for index in missing_audio]
+            spoken_texts = [prepare_speech_text_and_tone(texts_by_index[index], lang)[0] for index in missing_audio]
+            generate_kokoro_batch(
+                spoken_texts, wav_paths, lang, kokoro_voice, _get_kokoro_speed(job_data),
+            )
+            for index, wav_path in zip(missing_audio, wav_paths):
+                audio_paths[index] = wav_path
+        else:
+            if tts_engine == "kokoro":
+                print(f"[Worker-General] Kokoro '{lang}' dilini desteklemiyor; Edge TTS kullanılacak.")
+            for index in missing_audio:
+                text, rate, pitch = prepare_speech_text_and_tone(texts_by_index[index], lang)
+                edge_path = work_dir / f"general_scene_{index}.mp3"
+                generate_speech(text, voice_cfg["narrator"], str(edge_path), rate=rate, pitch=pitch)
+                audio_paths[index] = edge_path
+
+    normalized_audio = {}
+    for index, source_path in audio_paths.items():
+        output_path = work_dir / f"general_scene_{index}.mp3"
+        if source_path != output_path:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-i", str(source_path),
+                    "-ar", "48000", "-ac", "2", "-codec:a", "libmp3lame",
+                    "-b:a", "192k", str(output_path),
+                ],
+                capture_output=True, check=True,
+            )
+        if not output_path.is_file() or output_path.stat().st_size == 0:
+            raise RuntimeError(f"Sahne ses dosyası oluşturulamadı: {output_path.name}")
+        normalized_audio[index] = output_path
+
+    width_height_filter = (
+        f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},setsar=1"
+    )
+    video_segments = []
+    concat_file = work_dir / "general_scene_concat.txt"
+    for index, text, _payload in entries:
+        audio_path = normalized_audio[index]
+        duration = _probe_scene_audio_duration(audio_path)
+        segment_path = work_dir / f"general_scene_video_{index}.mp4"
+        image_path = scene_images.get(index)
+        command = ["ffmpeg", "-y"]
+        if image_path:
+            command.extend(["-loop", "1", "-framerate", "25", "-i", str(image_path)])
+        else:
+            command.extend(["-f", "lavfi", "-i", f"color=c=0x0f172a:s={width}x{height}:r=25"])
+        command.extend([
+            "-i", str(audio_path),
+            "-vf", width_height_filter,
+            "-t", f"{duration:.6f}",
+            "-map", "0:v:0", "-map", "1:a:0",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+            "-pix_fmt", "yuv420p", "-r", "25",
+            "-c:a", "aac", "-b:a", "192k", "-shortest",
+            str(segment_path),
+        ])
+        subprocess.run(command, capture_output=True, check=True)
+        if not segment_path.is_file() or segment_path.stat().st_size == 0:
+            raise RuntimeError(f"Sahne videosu oluşturulamadı: {segment_path.name}")
+        video_segments.append(segment_path)
+        print(
+            f"[Worker-General] Sahne {index + 1}/{len(scenes)}: "
+            f"{duration:.2f} sn ses, eşleşen görsel {image_path.name if image_path else 'arka plan'}"
+        )
+
+    with concat_file.open("w", encoding="utf-8") as file:
+        for segment in video_segments:
+            file.write(f"file '{segment.name}'\n")
+    output_video = work_dir / "final_video.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
+            "-c", "copy", "-movflags", "+faststart", str(output_video),
+        ],
+        capture_output=True, check=True, cwd=str(work_dir),
+    )
+    if not output_video.is_file() or output_video.stat().st_size == 0:
+        raise RuntimeError("Sahne eşlemeli genel video üretilemedi.")
+    return output_video
+
+
 def render_general_job(job_data: dict, work_dir: Path) -> Path:
     channel_id = job_data.get("channel_id", "general")
     script = job_data.get("script_data") or job_data.get("script") or {}
@@ -2252,6 +2467,15 @@ def render_general_job(job_data: dict, work_dir: Path) -> Path:
         content_text = script.get("title") or channel_id
 
     custom_audios = job_data.get("custom_audios") or {}
+    legacy_full_track = any(key in custom_audios for key in ("voiceover", "main"))
+    if not legacy_full_track and scenes and not _has_per_scene_audio(custom_audios, len(scenes)):
+        numeric_audio_keys = {str(key) for key in custom_audios if str(key).isdigit()}
+        legacy_full_track = numeric_audio_keys == {"0"}
+    if scenes and not legacy_full_track:
+        return _render_scene_aligned_general(
+            job_data, script, scenes, work_dir, lang, voice_cfg, W, H,
+        )
+
     audio_file = work_dir / "voiceover.mp3"
     used_custom = False
     if custom_audios:
@@ -2294,10 +2518,90 @@ def render_general_job(job_data: dict, work_dir: Path) -> Path:
             generate_speech(spoken_text, voice_cfg["narrator"], str(audio_file), rate=rate, pitch=pitch)
 
     dur = get_media_duration(str(audio_file))
-
     output_video = work_dir / "final_video.mp4"
     title_text = (script.get("title") or channel_id).replace("'", "").replace(":", "")[:60]
 
+    # 1. Custom Images (Materyal görselleri) varsa decode et ve kullan
+    custom_images = job_data.get("custom_images") or {}
+    image_files = []
+    if custom_images and isinstance(custom_images, dict):
+        for k in sorted(custom_images.keys(), key=lambda x: int(x) if str(x).isdigit() else 999):
+            if k == "avatar":
+                continue
+            val = custom_images[k]
+            if not val:
+                continue
+            out_img = work_dir / f"scene_img_{k}.jpg"
+            if isinstance(val, str) and "data:image" in val and "," in val:
+                try:
+                    b64_data = val.split(",", 1)[1]
+                    out_img.write_bytes(base64.b64decode(b64_data))
+                    image_files.append(out_img)
+                except Exception as e_im:
+                    print(f"[Worker-General] Görsel çözme uyarısı ({k}): {e_im}")
+            elif isinstance(val, str) and (val.startswith("http://") or val.startswith("https://")):
+                try:
+                    import urllib.request
+                    req = urllib.request.Request(val, headers={"User-Agent": "Mozilla/5.0"})
+                    with urllib.request.urlopen(req, timeout=15) as resp:
+                        out_img.write_bytes(resp.read())
+                    image_files.append(out_img)
+                except Exception as e_dl:
+                    print(f"[Worker-General] Görsel indirme uyarısı ({k}): {e_dl}")
+            elif isinstance(val, str) and os.path.exists(val):
+                image_files.append(Path(val))
+
+    # 2. Eğer görseller mevcutsa gerçek slideshow oluştur (Ken Burns & dikey 9:16)
+    if image_files:
+        print(f"[Worker-General] 🖼️ {len(image_files)} adet materyal görseli ile video montajı yapılıyor...")
+        if scenes and legacy_full_track:
+            scene_durations = _allocate_legacy_scene_durations(scenes, dur)
+            segment_images = [
+                image_files[min(index, len(image_files) - 1)]
+                for index in range(len(scene_durations))
+            ]
+            segment_durations = scene_durations
+        else:
+            segment_images = image_files
+            segment_durations = [dur / len(image_files)] * len(image_files)
+        seg_list = []
+        concat_file = work_dir / "general_concat.txt"
+        for idx_img, (img_p, sc_dur) in enumerate(zip(segment_images, segment_durations)):
+            seg_out = work_dir / f"gen_seg_{idx_img}.ts"
+            frames = int(round(sc_dur * 25))
+            cmd_s = [
+                "ffmpeg", "-y", "-loop", "1", "-i", str(img_p),
+                "-t", f"{sc_dur:.2f}",
+                "-vf", f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},zoompan=z='min(zoom+0.0006,1.12)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={W}x{H}:fps=25,fps=25,setsar=1",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
+                "-an", str(seg_out)
+            ]
+            res_s = subprocess.run(cmd_s, capture_output=True)
+            if res_s.returncode == 0 and seg_out.exists():
+                seg_list.append(seg_out)
+
+        if seg_list:
+            with open(concat_file, "w") as f_c:
+                for s_item in seg_list:
+                    f_c.write(f"file '{s_item.name}'\n")
+
+            ffmpeg_cmd = [
+                "ffmpeg", "-y",
+                "-f", "concat", "-safe", "0", "-i", str(concat_file),
+                "-i", str(audio_file),
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "192k",
+                "-shortest", str(output_video)
+            ]
+            subprocess.run(ffmpeg_cmd, capture_output=True, check=True, cwd=str(work_dir))
+            for s_item in seg_list:
+                try: s_item.unlink()
+                except Exception: pass
+            try: concat_file.unlink()
+            except Exception: pass
+            return output_video
+
+    # 3. Görsel yoksa fallback (solid arka plan)
     ffmpeg_cmd = [
         "ffmpeg", "-y",
         "-f", "lavfi", "-i", f"color=c=0x0f172a:s={W}x{H}:d={dur + 1.0}",
@@ -2343,7 +2647,7 @@ def handle_youtube_upload(job_data: dict, video_path: Path) -> dict:
 # ─────────────────────────────────────────────────────────────
 # 6. Ana Görev Yöneticisi (Main Execution)
 # ─────────────────────────────────────────────────────────────
-def run_job(job_file: Path):
+def run_job(job_file: Path, force_rebuild: bool = False):
     if not job_file.exists():
         print(f"❌ Görev dosyası bulunamadı: {job_file}")
         sys.exit(1)
@@ -2352,6 +2656,7 @@ def run_job(job_file: Path):
     job_id = job_data.get("job_id", f"job_{int(time.time())}")
     channel_id = job_data.get("channel_id", "default")
     topic_category = str(job_data.get("channel_config", {}).get("topic_category", "")).lower()
+    force_rebuild = force_rebuild or job_data.get("force_rebuild", False)
 
     status_file = JOBS_DIR / f"{job_id}_status.json"
     
@@ -2369,7 +2674,29 @@ def run_job(job_file: Path):
         status_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
 
     work_dir = OUTPUT_BASE / channel_id / job_id
+    
+    # ── PROJE BAZLI ÇALIŞMA ALANI İZOLASYONU (Job-Level Sandboxing) ──
+    # Her iş emri için izole çalışma dizini ve alt klasörleri
+    workspace_dir = BASE_DIR / "workspace" / job_id
+    job_data["workspace_dir"] = str(workspace_dir)
+
+    if force_rebuild:
+        print(f"[Worker] 🔄 --force-rebuild aktif: {job_id} çalışma alanı ve eski çıktılar sıfırlanıyor...")
+        if workspace_dir.exists():
+            shutil.rmtree(workspace_dir, ignore_errors=True)
+        if work_dir.exists():
+            for f in work_dir.glob("*.mp4"):
+                try: f.unlink()
+                except Exception: pass
+            for f in work_dir.glob("raw_*"):
+                try: f.unlink()
+                except Exception: pass
+
     work_dir.mkdir(parents=True, exist_ok=True)
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    (workspace_dir / "downloads").mkdir(parents=True, exist_ok=True)
+    (workspace_dir / "photo_pool").mkdir(parents=True, exist_ok=True)
+    (workspace_dir / "cuts").mkdir(parents=True, exist_ok=True)
 
     try:
         update_status("running", 10, "İşlem başlatıldı, parametreler hazırlandı...")
@@ -2402,6 +2729,13 @@ def run_job(job_file: Path):
             topic_category == "crayon_combat" or
             any(key in channel_id.lower() for key in ("tacticallcrayon", "tacticalcrayon"))
         )
+        is_sports = (
+            "basketball" in topic_category or
+            "sports" in topic_category or
+            "basketball" in channel_id.lower() or
+            "sports" in channel_id.lower() or
+            "thebasketballshows" in channel_id.lower()
+        )
         if is_whatsapp:
             update_status("rendering", 30, "WhatsApp sohbet sesleri ve Remotion render yapılıyor...")
             video_file = render_whatsapp_job(job_data, work_dir)
@@ -2414,6 +2748,10 @@ def run_job(job_file: Path):
         elif is_aviation:
             update_status("rendering", 30, "Havacılık belgeseli, 16:9 Pixabay video/arşiv ve altyazı render yapılıyor...")
             video_file = render_aviation_job(job_data, work_dir)
+        elif is_sports:
+            update_status("rendering", 30, "🏀 Spor/NBA dinamik jump-cut, gerçek arşiv görselleri ve altyazı render yapılıyor...")
+            from sports_shorts_engine import render_sports_shorts_job
+            video_file = render_sports_shorts_job(job_data, work_dir, workspace_dir=workspace_dir, force_rebuild=force_rebuild)
         else:
             update_status("rendering", 30, f"{topic_category} formatında video üretiliyor...")
             video_file = render_general_job(job_data, work_dir)
@@ -2423,6 +2761,16 @@ def run_job(job_file: Path):
 
         # Metadata ve video bilgi dosyalarını kaydet (Mac indirmesi ve listeleme için)
         script = job_data.get("script_data") or job_data.get("script") or {}
+
+        # Evrensel Transparan Sosyal CTA (Abone Ol + Beğen + Bildirim) Katmanı
+        try:
+            from social_cta_overlay import apply_social_cta_overlay
+            cta_lang = str(job_data.get("language") or script.get("language") or "en").lower()
+            update_status("rendering", 92, f"Transparan Abone Ol & Beğen CTA katmanı ekleniyor ({cta_lang})...")
+            apply_social_cta_overlay(video_file, video_file, language=cta_lang, show_at_start=False, show_at_end=True)
+        except Exception as e_cta:
+            print(f"[Worker] ⚠️ Social CTA overlay uyarısı: {e_cta}")
+
         title = script.get("title") or f"Shorts #{job_data.get('row_id', '1')}"
         desc = script.get("description") or "#Shorts #Viral #Trending"
         tags = script.get("tags") or ["Shorts", "Viral"]
@@ -2514,5 +2862,6 @@ def run_job(job_file: Path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--job", required=True, help="Job JSON dosyası yolu")
+    parser.add_argument("--force-rebuild", action="store_true", help="Var olan çıktı ve çalışma alanını sıfırdan yeniden oluşturur")
     args = parser.parse_args()
-    run_job(Path(args.job))
+    run_job(Path(args.job), force_rebuild=args.force_rebuild)

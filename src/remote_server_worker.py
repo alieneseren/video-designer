@@ -1602,6 +1602,7 @@ def render_aviation_job(job_data: dict, work_dir: Path) -> Path:
     script = job_data.get("script_data") or job_data.get("script") or {}
     channel_cfg = job_data.get("channel_config") or {}
     custom_audios = job_data.get("custom_audios") or {}
+    custom_images = job_data.get("custom_images") or {}
     lang = (channel_cfg.get("language") or "en").lower().strip()
     is_shorts = bool(channel_cfg.get("shorts_mode", False))
     
@@ -1846,52 +1847,74 @@ def render_aviation_job(job_data: dict, work_dir: Path) -> Path:
             global_time_offset += sc_dur
             continue
 
-        if sc.get("is_intro_card"):
-            card_img = work_dir / f"intro_title_card_{idx}.png"
-            try:
-                from PIL import Image, ImageDraw
-                im_card = Image.new("RGB", (W, H), (8, 14, 22))
-                d_card = ImageDraw.Draw(im_card)
-                for gx in range(0, W, 80):
-                    d_card.line([(gx, 0), (gx, H)], fill=(14, 22, 34), width=1)
-                for gy in range(0, H, 80):
-                    d_card.line([(0, gy), (W, gy)], fill=(14, 22, 34), width=1)
-                
-                # Badge
-                d_card.rectangle([(W//2 - 380, H//2 - 160), (W//2 + 380, H//2 - 110)], fill=(0, 200, 255))
+        media_path = None
+        # ── ÖNCEDEN DOĞRULANMIŞ ARAŞTIRMA MEDYASI KONTROLÜ (Pre-researched media) ──
+        pre_media = custom_images.get(str(idx)) or custom_images.get(idx)
+        if pre_media and not sc.get("is_intro_card"):
+            if isinstance(pre_media, str) and pre_media.startswith("data:"):
                 try:
-                    from aviation_telemetry_engine import get_font as get_eng_font
-                except ImportError:
-                    get_eng_font = lambda sz, b=False: None
-                d_card.text((W//2 - 360, H//2 - 150), "BLACK BOX AUDIO // OFFICIAL CASE ARCHIVE", fill=(10, 15, 24), font=get_eng_font(24, True))
-                
-                f_title = meta.get("flight_name", topic).upper()[:45] if meta else topic.upper()[:45]
-                d_card.text((W//2 - 420, H//2 - 60), f_title, fill=(255, 255, 255), font=get_eng_font(40, True))
-                
-                sub_label = f"AIRCRAFT: {meta.get('aircraft_type', 'COMMERCIAL JET')}   |   ATC / CVR RECONSTRUCTION" if meta else "AIRCRAFT ACCIDENT RECONSTRUCTION"
-                d_card.text((W//2 - 420, H//2 + 30), sub_label, fill=(0, 210, 255), font=get_eng_font(20, False))
-                d_card.line([(W//2 - 420, H//2 + 75), (W//2 + 420, H//2 + 75)], fill=(0, 180, 220), width=3)
-                im_card.save(card_img, "PNG")
-                media_path = str(card_img)
-                print(f"[Worker-Aviation] 🎬 Kanal Başlık Kartı hazırlandı: {card_img.name}")
-            except Exception as e_card:
-                print(f"[Worker-Aviation] İntro kart üretim hatası: {e_card}")
-                media_path = None
-        else:
-            print(f"[Worker-Aviation] Sahne {idx+1}/{len(scenes)} için medya çekiliyor (Süre: {sc_dur:.1f}s)...")
-            media_path = aviation_media_fetcher.get_aviation_scene_media(
-                scene_idx=idx,
-                total_scenes=len(scenes),
-                topic=topic,
-                scene_data=sc,
-                work_dir=work_dir,
-                target_w=W,
-                target_h=H,
-                target_dur=sc_dur,
-                session_used=used_media_ids,
-                metadata=meta,
-                all_scenes=scenes
-            )
+                    import base64
+                    header, b64data = pre_media.split(",", 1)
+                    ext = "mp4" if "video" in header else "jpg"
+                    custom_file = work_dir / f"scene_{idx}_researched.{ext}"
+                    with open(custom_file, "wb") as f_c:
+                        f_c.write(base64.b64decode(b64data))
+                    if custom_file.exists() and custom_file.stat().st_size > 1000:
+                        media_path = str(custom_file)
+                        print(f"[Worker-Aviation] 💎 Sahne {idx+1} için önceden doğrulanmış araştırma medyası kullanılıyor: {custom_file.name}")
+                except Exception as e_b64:
+                    print(f"[Worker-Aviation] Base64 medya açma hatası (Sahne {idx}): {e_b64}")
+            elif isinstance(pre_media, str) and os.path.exists(pre_media):
+                media_path = pre_media
+                print(f"[Worker-Aviation] 💎 Sahne {idx+1} için önceden doğrulanmış yerel araştırma medyası kullanılıyor: {pre_media}")
+
+        if not media_path:
+            if sc.get("is_intro_card"):
+                card_img = work_dir / f"intro_title_card_{idx}.png"
+                try:
+                    from PIL import Image, ImageDraw
+                    im_card = Image.new("RGB", (W, H), (8, 14, 22))
+                    d_card = ImageDraw.Draw(im_card)
+                    for gx in range(0, W, 80):
+                        d_card.line([(gx, 0), (gx, H)], fill=(14, 22, 34), width=1)
+                    for gy in range(0, H, 80):
+                        d_card.line([(0, gy), (W, gy)], fill=(14, 22, 34), width=1)
+                    
+                    # Badge
+                    d_card.rectangle([(W//2 - 380, H//2 - 160), (W//2 + 380, H//2 - 110)], fill=(0, 200, 255))
+                    try:
+                        from aviation_telemetry_engine import get_font as get_eng_font
+                    except ImportError:
+                        get_eng_font = lambda sz, b=False: None
+                    d_card.text((W//2 - 360, H//2 - 150), "BLACK BOX AUDIO // OFFICIAL CASE ARCHIVE", fill=(10, 15, 24), font=get_eng_font(24, True))
+                    
+                    f_title = meta.get("flight_name", topic).upper()[:45] if meta else topic.upper()[:45]
+                    d_card.text((W//2 - 420, H//2 - 60), f_title, fill=(255, 255, 255), font=get_eng_font(40, True))
+                    
+                    sub_label = f"AIRCRAFT: {meta.get('aircraft_type', 'COMMERCIAL JET')}   |   ATC / CVR RECONSTRUCTION" if meta else "AIRCRAFT ACCIDENT RECONSTRUCTION"
+                    d_card.text((W//2 - 420, H//2 + 30), sub_label, fill=(0, 210, 255), font=get_eng_font(20, False))
+                    d_card.line([(W//2 - 420, H//2 + 75), (W//2 + 420, H//2 + 75)], fill=(0, 180, 220), width=3)
+                    im_card.save(card_img, "PNG")
+                    media_path = str(card_img)
+                    print(f"[Worker-Aviation] 🎬 Kanal Başlık Kartı hazırlandı: {card_img.name}")
+                except Exception as e_card:
+                    print(f"[Worker-Aviation] İntro kart üretim hatası: {e_card}")
+                    media_path = None
+            else:
+                print(f"[Worker-Aviation] Sahne {idx+1}/{len(scenes)} için medya çekiliyor (Süre: {sc_dur:.1f}s)...")
+                media_path = aviation_media_fetcher.get_aviation_scene_media(
+                    scene_idx=idx,
+                    total_scenes=len(scenes),
+                    topic=topic,
+                    scene_data=sc,
+                    work_dir=work_dir,
+                    target_w=W,
+                    target_h=H,
+                    target_dur=sc_dur,
+                    session_used=used_media_ids,
+                    metadata=meta,
+                    all_scenes=scenes
+                )
         
         if media_path and os.path.exists(media_path):
             climate = meta.get("climate", "NEUTRAL") if meta else aviation_media_fetcher.detect_climate_mode(f"{topic} {sc.get('narration', '')}")
@@ -1959,12 +1982,16 @@ def render_aviation_job(job_data: dict, work_dir: Path) -> Path:
                 else:
                     alt_query = "cockpit airplane" if idx % 2 == 0 else "airport runway"
 
+                tgt_plane = meta.get("aircraft_type", "") if meta else ""
+                sc_mood = aviation_media_fetcher.detect_scene_tension_mood(sc.get("narration", ""))
                 alt_vid = aviation_media_fetcher.search_pixabay_video(
                     alt_query, 
                     exclude_ids=used_media_ids, 
                     min_duration=dur2, 
                     climate=climate,
-                    aircraft_category=category
+                    aircraft_category=category,
+                    target_aircraft=tgt_plane,
+                    scene_mood=sc_mood
                 )
                 part2_done = False
                 if alt_vid and aviation_media_fetcher.download_and_format_video(alt_vid["url"], str(sub2), W, H, dur2):
@@ -2362,6 +2389,12 @@ def run_job(job_file: Path):
             "flight" in channel_id.lower() or
             "aviation" in channel_id.lower()
         )
+        is_sports = (
+            "basketball" in topic_category or
+            "sports" in topic_category or
+            "nba" in topic_category or
+            "thebasketballshows" in channel_id.lower()
+        )
         if is_whatsapp:
             update_status("rendering", 30, "WhatsApp sohbet sesleri ve Remotion render yapılıyor...")
             video_file = render_whatsapp_job(job_data, work_dir)
@@ -2371,12 +2404,28 @@ def run_job(job_file: Path):
         elif is_aviation:
             update_status("rendering", 30, "Havacılık belgeseli, 16:9 Pixabay video/arşiv ve altyazı render yapılıyor...")
             video_file = render_aviation_job(job_data, work_dir)
+        elif is_sports:
+            update_status("rendering", 30, "NBA ve spor analizi, dinamik kesmeler ve altyazı render yapılıyor...")
+            try:
+                import sports_shorts_engine
+            except ImportError:
+                from src import sports_shorts_engine
+            video_file = sports_shorts_engine.render_sports_short(job_data, work_dir)
         else:
             update_status("rendering", 30, f"{topic_category} formatında video üretiliyor...")
             video_file = render_general_job(job_data, work_dir)
 
         if not video_file.exists():
             raise RuntimeError("Video dosyası üretilemedi.")
+
+        # Evrensel Transparan Sosyal CTA (Abone Ol + Beğen + Bildirim) Katmanı
+        try:
+            from social_cta_overlay import apply_social_cta_overlay
+            cta_lang = str(job_data.get("language") or script.get("language") or "en").lower()
+            update_status("rendering", 92, f"Transparan Abone Ol & Beğen CTA katmanı ekleniyor ({cta_lang})...")
+            apply_social_cta_overlay(video_file, video_file, language=cta_lang)
+        except Exception as e_cta:
+            print(f"[Worker] ⚠️ Social CTA overlay uyarısı: {e_cta}")
 
         # Metadata ve video bilgi dosyalarını kaydet (Mac indirmesi ve listeleme için)
         script = job_data.get("script_data") or job_data.get("script") or {}

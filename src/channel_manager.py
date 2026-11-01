@@ -41,6 +41,7 @@ DEFAULT_EDIT_OPTIONS = {
     "enable_hyperframes_hook": False,
     "hyperframes_hook_badge": "YENİ VİDEO",
     "auto_ai_qa_enabled": False,
+    "voice_clone_id": None,          # None → global aktif ses klonu kullanılır
 }
 
 # ── Konu Kategorilerine Göre İdeal Kanal & Video Ayar Profilleri ──
@@ -135,10 +136,19 @@ CATEGORY_PRESETS: dict[str, dict] = {
         "schedule_hour": 19,
         "transition": "fade",
         "edit_options": {
-            "video_duration": "50",
+            "video_duration": "42",
+            "subtitle_preset": "tiktok_bold_yellow",
+            "subtitle_animation": "pop",
+            "kenburns_intensity": "0.08",
+            "transition_dur": "0.4",
             "hook_intro_effect": True,
+            "enable_hyperframes_hook": True,
+            "hyperframes_hook_badge": "🌍 MUST VISIT",
             "normalize_audio_loudness": True,
             "youtube_category": "travel",
+            "music_genre": "travel_acoustic",
+            "music_theme": "inspiring",
+            "music_duration": 45,
             "intro_clip_path": None,
             "outro_clip_path": None,
         }
@@ -148,7 +158,7 @@ CATEGORY_PRESETS: dict[str, dict] = {
         "schedule_hour": 19,
         "transition": "parallax",
         "edit_options": {
-            "video_duration": "420",
+            "video_duration": "390",
             "kenburns_intensity": "0.03",
             "hook_intro_effect": True,
             "normalize_audio_loudness": True,
@@ -184,6 +194,27 @@ CATEGORY_PRESETS: dict[str, dict] = {
             "intro_clip_path": None,
             "outro_clip_path": None,
         }
+    },
+    "basketball_analysis": {
+        "shorts_mode": True,
+        "schedule_hour": 19,
+        "transition": "fade",
+        "edit_options": {
+            "video_duration": "42",
+            "hook_intro_effect": True,
+            "normalize_audio_loudness": True,
+            "enable_hyperframes_hook": True,
+            "hyperframes_hook_badge": "🏀 MUST WATCH",
+            "youtube_category": "sports",
+            "intro_clip_path": None,
+            "outro_clip_path": None,
+            "kenburns_intensity": "0.08",
+            "bgm_volume": "0.18",
+            "music_genre": "hiphop_sports",
+            "music_theme": "energetic",
+            "music_duration": 45,
+            "auto_ai_qa_enabled": True,
+        }
     }
 }
 
@@ -191,6 +222,8 @@ CATEGORY_PRESETS: dict[str, dict] = {
 def normalize_category_name(category: str) -> str:
     """Kategori eş anlamlılarını ve varyasyonlarını standart formata çevirir."""
     c = (category or "").lower().strip()
+    if c in ("basketball", "basketball_analysis", "nba", "sports", "basketbol", "thebasketballshows"):
+        return "basketball_analysis"
     if c in ("whatsapp", "whatsapp_chat", "whatsapp_stories"):
         return "whatsapp_stories"
     if c in ("reddit", "reddit_stories"):
@@ -207,7 +240,7 @@ def normalize_category_name(category: str) -> str:
         return "music"
     if c in ("space", "uzay", "cosmos"):
         return "space"
-    if c in ("travel", "gezi"):
+    if c in ("travel", "gezi", "letstravel", "letstraveii"):
         return "travel"
     if c in ("story", "hikaye"):
         return "story"
@@ -354,7 +387,65 @@ def get_localized_metadata(title: str, language: str = "tr", category: str = "re
             desc = f"{clean_title}\n\nEvren bir simülasyonsa kaç GB RAM gerekirdi? Tüm insanlık aynı anda zıplarsa ne olur? Bilimsel düşünce deneyleri, absürt fizik ve mühendislik hesaplamaları çöp adam animasyonları ve infografiklerle karşınızda! Abone olup zili açmayı unutmayın! 🔔\n\n#Bilim #Fizik #EğerOlsaydı #Simülasyon #DüşünceDeneyi #Mühendislik #Belgesel #BoşKafa"
             tags = ["Bilim", "Fizik", "EğerOlsaydı", "Simülasyon", "DüşünceDeneyi", "Kuantum", "Mühendislik", "Belgesel", "BoşKafa"]
 
-    # 7. Genel / Uzay / Diğer
+    # 8. Basketbol & Spor Hikayeleri (Basketball Analysis)
+    elif cat in ("basketball_analysis", "basketball", "sports", "nba"):
+        if lang == "en":
+            desc = (
+                f"{clean_title}\n\n"
+                f"{hook_part}"
+                "Unbelievable NBA moments, tactical play breakdowns, and untold basketball stories that changed the game forever.\n\n"
+                "🏀 Subscribe to The Basketball Show for daily deep-dive basketball shorts, mind-blowing records, and clutch highlights!\n\n"
+                "Which player or play should we break down next? Drop your thoughts in the comments below! 👇\n\n"
+                "#Basketball #NBA #TheBasketballShow #NBAShorts #BasketballAnalysis #Hoops #ClutchPlays #NBAHistory"
+            )
+            tags = [
+                "Basketball", "NBA", "TheBasketballShow", "NBAShorts", "BasketballAnalysis",
+                "NBAHighlights", "Hoops", "ClutchPlays", "NBAHistory", "BasketballStories"
+            ]
+        else:
+            desc = (
+                f"{clean_title}\n\n"
+                f"{hook_part}"
+                "Tarihin en akıl almaz NBA anları, taktiksel oyun kırılımları ve basketbol tarihini değiştiren gizli hikayeler!\n\n"
+                "🏀 Günlük basketbol analizleri, rekorlar ve efsanevi anlar için The Basketball Show kanalına abone olmayı unutmayın! 🔔\n\n"
+                "Sizce bir sonraki videoda hangi oyuncuyu veya pozisyonu inceleyelim? Yorumlarda belirtin! 👇\n\n"
+                "#Basketbol #NBA #TheBasketballShow #BasketbolAnaliz #NBATürkiye #EfsaneAnlar #SporHaberleri"
+            )
+            tags = [
+                "Basketbol", "NBA", "TheBasketballShow", "BasketbolAnaliz", "NBATürkiye",
+                "EfsaneAnlar", "SporHaberleri", "BasketbolHikayeleri", "KobeBryant", "LeBronJames"
+            ]
+
+    # 9. Seyahat & Şehir Keşifleri (Travel Guide & Exploration)
+    elif cat in ("travel", "gezi", "letstravel", "letstraveii"):
+        if lang == "en":
+            desc = (
+                f"{clean_title}\n\n"
+                f"{hook_part}"
+                "Discover the world's most incredible travel destinations, hidden gems, and authentic street food!\n\n"
+                "✈️ Subscribe to Let's Travel for weekly immersive city guides, budget travel hacks, and breathtaking cultural experiences! 🔔\n\n"
+                "Which destination should we explore next? Let us know in the comments! 👇\n\n"
+                "#Travel #TravelShorts #ExploreTheWorld #LetsTravel #Wanderlust #StreetFood #HiddenGems #CityGuide #TravelHacks"
+            )
+            tags = [
+                "Travel", "TravelShorts", "ExploreTheWorld", "LetsTravel", "Wanderlust",
+                "StreetFood", "HiddenGems", "CityGuide", "TravelHacks", "Vacation", "WorldTour"
+            ]
+        else:
+            desc = (
+                f"{clean_title}\n\n"
+                f"{hook_part}"
+                "Dünyanın en büyüleyici seyahat rotaları, gizli kalmış cennetleri ve eşsiz sokak lezzetleri!\n\n"
+                "✈️ Haftalık şehir rehberleri, bütçe dostu seyahat tüyoları ve maceralar için Let's Travel kanalına abone olun! 🔔\n\n"
+                "Bir sonraki rotamız neresi olsun? Yorumlarda buluşalım! 👇\n\n"
+                "#Seyahat #GeziRehberi #DünyaTuru #Tatil #SokakLezzetleri #Gezgin #LetsTravel #Keşfet"
+            )
+            tags = [
+                "Seyahat", "GeziRehberi", "DünyaTuru", "Tatil", "SokakLezzetleri",
+                "Gezgin", "LetsTravel", "Keşfet", "SeyahatTüyoları", "ŞehirRehberi"
+            ]
+
+    # 10. Genel / Uzay / Diğer
     else:
         if lang == "en":
             desc = f"{clean_title}\n\nDetailed breakdown and educational insights. Don't forget to like, subscribe, and turn on notifications for more content! 🔔\n\n#Education #Documentary #DeepDive"
@@ -487,6 +578,7 @@ class ChannelManager:
         shorts_mode: bool = False,
         transition: str = "fade",
         edit_options: dict = None,
+        voice_clone_id: str | None = None,
         instagram: bool | None = None,
         instagram_username: str = None,
         instagram_user_id: str = None,
@@ -501,6 +593,9 @@ class ChannelManager:
         eff_transition = transition if (transition and transition != "fade") else preset.get("transition", "fade")
         
         merged_edit_opts = {**DEFAULT_EDIT_OPTIONS, **preset.get("edit_options", {}), **(existing_channel.get("edit_options") or {}), **(edit_options or {})}
+        if voice_clone_id is not None:
+            merged_edit_opts["voice_clone_id"] = voice_clone_id or None
+        eff_voice_clone_id = merged_edit_opts.get("voice_clone_id") or existing_channel.get("voice_clone_id")
 
         channel = {
             "channel_id": channel_id,
@@ -513,6 +608,7 @@ class ChannelManager:
             "active": active,
             "shorts_mode": eff_shorts_mode,
             "transition": eff_transition,
+            "voice_clone_id": eff_voice_clone_id,
             "edit_options": merged_edit_opts,
             "instagram": bool(existing_channel.get("instagram", False) if instagram is None else instagram),
             "instagram_username": (instagram_username or "").strip().lstrip("@") or existing_channel.get("instagram_username", ""),

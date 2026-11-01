@@ -3,24 +3,25 @@ from pathlib import Path
 
 def sync_materials_with_generated_videos(manager, materials: list[dict]) -> None:
     """Mark matching materials and plan rows produced once a final video exists."""
-    pending = [
-        item for item in materials
-        if item.get("status") not in ("produced", "downloaded")
-    ]
-    if not pending:
+    if not materials:
         return
 
     remote_videos = []
     queue_state = {}
-    try:
-        from remote_runner import RemoteRunner
+    active_materials = [
+        item for item in materials
+        if item.get("status") not in ("produced", "downloaded")
+    ]
+    if active_materials:
+        try:
+            from remote_runner import RemoteRunner
 
-        runner = RemoteRunner()
-        remote_videos = runner.list_server_videos()
-        if any(item.get("status") == "in_cloud_queue" for item in pending):
-            queue_state = runner.get_queue_status()
-    except Exception as exc:
-        print(f"[MATERIAL-SYNC] Uzak video durumu okunamadı: {exc}")
+            runner = RemoteRunner()
+            remote_videos = runner.list_server_videos()
+            if any(item.get("status") == "in_cloud_queue" for item in active_materials):
+                queue_state = runner.get_queue_status()
+        except Exception as exc:
+            print(f"[MATERIAL-SYNC] Uzak video durumu okunamadı: {exc}")
 
     remote_by_channel: dict[str, list[dict]] = {}
     for video in remote_videos:
@@ -34,10 +35,11 @@ def sync_materials_with_generated_videos(manager, materials: list[dict]) -> None
     from channel_manager import ChannelManager
     from content_planner import ContentPlanner
 
-    for material in pending:
+    for material in materials:
         channel_id = str(material.get("channel_id") or "")
         material_id = str(material.get("material_id") or material.get("id") or "")
         row_id = str(material.get("row_id") or "")
+        already_produced = material.get("status") in ("produced", "downloaded")
         is_group, clean_id, target_dir = manager._resolve_target(channel_id)
 
         if is_group:
@@ -53,7 +55,7 @@ def sync_materials_with_generated_videos(manager, materials: list[dict]) -> None
         else:
             expected_channels = [channel_id] if channel_id else []
 
-        if material.get("status") == "in_cloud_queue":
+        if not already_produced and material.get("status") == "in_cloud_queue":
             if not is_group and f"exec_{material_id}" in pending_job_ids:
                 continue
             if is_group and any(
@@ -96,14 +98,20 @@ def sync_materials_with_generated_videos(manager, materials: list[dict]) -> None
         else:
             produced = bool(expected_channels) and bool(local_matches or remote_matches)
 
-        if not produced:
+        if not produced and not already_produced:
             continue
 
-        if manager.update_material_status(channel_id, material_id, "produced"):
+        if not already_produced and manager.update_material_status(channel_id, material_id, "produced"):
             material["status"] = "produced"
         if row_id:
             try:
                 planner = ContentPlanner(target_dir)
-                planner.mark_as_produced(row_id)
+                plan_row = next(
+                    (row for row in planner.get_plan() if str(row.get("id", "")).strip() == row_id),
+                    None,
+                )
+                plan_status = str((plan_row or {}).get("uretildi") or "").strip().lower()
+                if plan_row and plan_status not in ("evet", "yes", "true", "1"):
+                    planner.mark_as_produced(row_id)
             except Exception as exc:
                 print(f"[MATERIAL-SYNC] Plan satırı üretildi olarak işaretlenemedi ({channel_id}/{row_id}): {exc}")

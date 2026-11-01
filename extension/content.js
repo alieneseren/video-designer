@@ -5317,6 +5317,7 @@ function normalizeScriptData(parsed) {
               user_gender: subParsed.user_gender || subParsed.user_avatar_gender || undefined,
               user_role_type: subParsed.user_role_type || undefined,
               bgm_track: subParsed.bgm_track || undefined,
+              bgm_timeline: subParsed.bgm_timeline || undefined,
               category: subParsed.category || (subMessages ? "whatsapp_stories" : undefined),
               question: subParsed.question || subParsed.soru || "",
               subreddit: subParsed.subreddit || "r/AskReddit",
@@ -5342,6 +5343,7 @@ function normalizeScriptData(parsed) {
   let user_gender = null;
   let user_role_type = null;
   let bgm_track = null;
+  let bgm_timeline = null;
   let category = null;
   let is_group = false;
   let group_name = null;
@@ -5363,6 +5365,7 @@ function normalizeScriptData(parsed) {
     user_gender = parsed.user_gender || parsed.user_avatar_gender || null;
     user_role_type = parsed.user_role_type || null;
     bgm_track = parsed.bgm_track || null;
+    bgm_timeline = parsed.bgm_timeline || null;
     category = parsed.category || null;
     is_group = parsed.is_group ?? parsed.isGroup ?? detectIsGroupChat(parsed);
     group_name = parsed.group_name || parsed.grup_adi || null;
@@ -5449,6 +5452,7 @@ function normalizeScriptData(parsed) {
     user_gender: user_gender || undefined,
     user_role_type: user_role_type || undefined,
     bgm_track: bgm_track || undefined,
+    bgm_timeline: bgm_timeline || undefined,
     category: category || (messages ? "whatsapp_stories" : undefined),
     question: parsed.question || parsed.soru || "",
     subreddit: parsed.subreddit || "r/AskReddit",
@@ -5788,6 +5792,28 @@ function normalizeMaterialsList(items, expectedItems = []) {
       const hasLangKeys = Object.keys(it).some(k => ["tr", "en", "de", "es", "fr", "it", "ru", "pt", "ja", "ko"].includes(k));
       if (hasLangKeys) {
         script = it;
+      }
+    }
+
+    // Çok dilli grup senaryolarında sahneler tek bir diziye yapıştırılmışsa (ör: 7 EN + 7 TR), otomatik dile göre ayır
+    if (script && Array.isArray(script.scenes) && script.scenes.length >= 6) {
+      const restartIdx = script.scenes.findIndex((s, idx) => idx > 0 && (s.scene_id === 1 || s.id === 1 || s.sahne_no === 1));
+      if (restartIdx > 0) {
+        const firstBlock = script.scenes.slice(0, restartIdx);
+        const secondBlock = script.scenes.slice(restartIdx);
+        const isFirstTr = firstBlock.some(s => /[çğıöşüÇĞİÖŞÜ]/.test(s.narration || ""));
+        const isSecondTr = secondBlock.some(s => /[çğıöşüÇĞİÖŞÜ]/.test(s.narration || ""));
+        if (!isFirstTr && isSecondTr) {
+          script = {
+            en: { ...script, scenes: firstBlock },
+            tr: { ...script, scenes: secondBlock }
+          };
+        } else if (isFirstTr && !isSecondTr) {
+          script = {
+            tr: { ...script, scenes: firstBlock },
+            en: { ...script, scenes: secondBlock }
+          };
+        }
       }
     }
     let hasRealScript = false;
@@ -8758,6 +8784,13 @@ async function loadIncompleteVideos(channelId) {
             html += `<option value="${row.id}">ID: ${row.id} - ${row.baslik || row.konu}</option>`;
           });
           select.innerHTML = html;
+        if (geminiPlanExecutionMode === "story") {
+          const storyCh = standalones.find(c => c.topic_category === "story" || c.id === "ch_story_tr");
+          if (storyCh) {
+            select.value = storyCh.id;
+          }
+          loadStoryDraftsDropdown(select.value);
+        }
         } else {
           select.innerHTML = "<option value=''>Yarım kalan video bulunamadı.</option>";
         }
@@ -10280,7 +10313,7 @@ function injectInstagramSidebarAction() {
 
 let geminiPlanRunning = false;
 let geminiPlanConsole = null;
-let geminiPlanExecutionMode = "new"; // "new" | "retro"
+let geminiPlanExecutionMode = "new"; // "new" | "retro" | "story"
 let geminiPlanPendingCache = null;
 
 function logGeminiPlan(msg, type = "info") {
@@ -10350,21 +10383,50 @@ function openGeminiPlanModal() {
     existing.style.display = "flex";
     if (geminiPlanExecutionMode === "retro") {
       loadRetroactiveChannelsDropdown();
+    } else if (geminiPlanExecutionMode === "story") {
+      loadPlanChannelsDropdown().then(() => {
+        const sel = document.getElementById("gemini-plan-channel-select");
+        loadStoryDraftsDropdown(sel ? sel.value : null);
+      });
     } else {
       loadPlanChannelsDropdown();
     }
     return;
   }
 
+  if (!document.getElementById("yt-oto-plan-modal-style")) {
+    const s = document.createElement("style");
+    s.id = "yt-oto-plan-modal-style";
+    s.textContent = `
+      #gemini-plan-modal-body::-webkit-scrollbar {
+        width: 5px;
+      }
+      #gemini-plan-modal-body::-webkit-scrollbar-track {
+        background: rgba(15, 23, 42, 0.6);
+        border-radius: 4px;
+      }
+      #gemini-plan-modal-body::-webkit-scrollbar-thumb {
+        background: #334155;
+        border-radius: 4px;
+      }
+      #gemini-plan-modal-body::-webkit-scrollbar-thumb:hover {
+        background: #475569;
+      }
+    `;
+    document.head.appendChild(s);
+  }
+
   const modal = document.createElement("div");
   modal.id = "gemini-plan-modal";
   modal.style.cssText = `
-    position: fixed; bottom: 144px; right: 24px; width: 390px;
-    background: #1e293b; border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 16px; padding: 20px;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
-    color: #f8fafc; display: flex; flex-direction: column; gap: 13px;
-    z-index: 10000000;
+    position: fixed; bottom: 20px; right: 20px; width: 430px;
+    max-width: calc(100vw - 32px); max-height: calc(100vh - 40px);
+    overflow: hidden;
+    background: #1e293b; border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 16px; padding: 14px 16px 12px 16px;
+    box-shadow: 0 25px 40px -5px rgba(0, 0, 0, 0.6), 0 10px 15px -5px rgba(0, 0, 0, 0.4);
+    color: #f8fafc; display: flex; flex-direction: column;
+    z-index: 10000000; box-sizing: border-box;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     animation: ytOtoFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   `;
@@ -10372,7 +10434,7 @@ function openGeminiPlanModal() {
   const header = document.createElement("div");
   header.style.cssText = `
     display: flex; align-items: center; justify-content: space-between;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 10px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 8px; flex-shrink: 0;
   `;
   header.innerHTML = `
     <div>
@@ -10399,21 +10461,45 @@ function openGeminiPlanModal() {
   header.appendChild(closeBtn);
   modal.appendChild(header);
 
-  // ── Mod Seçimi: Yeni Plan vs Geçmişe Dönük Materyal ──
+  // ── Mod Seçimi: Yeni Plan vs Geçmişe Dönük Materyal vs Hikaye Geliştir ──
   const modeSwitch = document.createElement("div");
   modeSwitch.style.cssText = `
     display: flex; gap: 4px; background: #0f172a; padding: 4px; border-radius: 10px;
-    border: 1px solid #334155; margin-bottom: 2px;
+    border: 1px solid #334155; margin-bottom: 8px; flex-shrink: 0;
   `;
   modeSwitch.innerHTML = `
     <button type="button" id="gemini-mode-new-btn" style="flex: 1; padding: 7px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; border: none; cursor: pointer; transition: all 0.2s; background: ${geminiPlanExecutionMode === "new" ? "#10b981" : "transparent"}; color: ${geminiPlanExecutionMode === "new" ? "#fff" : "#94a3b8"};">
       ✨ Yeni Plan
     </button>
     <button type="button" id="gemini-mode-retro-btn" style="flex: 1; padding: 7px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; border: none; cursor: pointer; transition: all 0.2s; background: ${geminiPlanExecutionMode === "retro" ? "linear-gradient(135deg, #06b6d4, #6366f1)" : "transparent"}; color: ${geminiPlanExecutionMode === "retro" ? "#fff" : "#94a3b8"};">
-      📦 Geçmişe Dönük Üret
+      📦 Geçmişe Dönük
+    </button>
+    <button type="button" id="gemini-mode-story-btn" style="flex: 1; padding: 7px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; border: none; cursor: pointer; transition: all 0.2s; background: ${geminiPlanExecutionMode === "story" ? "linear-gradient(135deg, #f59e0b, #ec4899)" : "transparent"}; color: ${geminiPlanExecutionMode === "story" ? "#fff" : "#94a3b8"};">
+      📖 Hikaye Geliştir
     </button>
   `;
   modal.appendChild(modeSwitch);
+
+  // Kaydırılabilir İç Gövde (Scrollable Inner Body - Sayfadan Taşmayı Kesin Olarak Önler)
+  const modalBody = document.createElement("div");
+  modalBody.id = "gemini-plan-modal-body";
+  modalBody.style.cssText = `
+    flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+    display: flex; flex-direction: column; gap: 9px; padding-right: 4px;
+  `;
+  modal.appendChild(modalBody);
+
+  // 1. Hedef Kanal Seçimi (Her zaman en üstte)
+  const group = document.createElement("div");
+  group.id = "gemini-plan-channel-group";
+  group.style.cssText = `display: flex; flex-direction: column; gap: 5px;`;
+  group.innerHTML = `
+    <label id="gemini-plan-channel-label" style="font-size: 12px; font-weight: 600; color: #94a3b8;">
+      ${geminiPlanExecutionMode === "story" ? "🎯 1. Hedef Kanal (Hikaye & Masal)" : "1. Hedef Kanal Seçin"}
+    </label>
+    <select id="gemini-plan-channel-select" style="background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 7px 10px; border-radius: 8px; font-size: 13px; outline: none; cursor: pointer;"></select>
+  `;
+  modalBody.appendChild(group);
 
   const retroNotice = document.createElement("div");
   retroNotice.id = "gemini-plan-retro-notice";
@@ -10424,31 +10510,24 @@ function openGeminiPlanModal() {
   retroNotice.innerHTML = `
     <strong>🔄 Geçmişe Dönük Mod:</strong> Aktif kanalların mevcut içerik planında yer alan henüz üretilmemiş konuları taranır ve senaryo/prompt materyalleri eksiksiz üretilir.
   `;
-  modal.appendChild(retroNotice);
-
-  const group = document.createElement("div");
-  group.style.cssText = `display: flex; flex-direction: column; gap: 6px;`;
-  group.innerHTML = `
-    <label style="font-size: 12px; font-weight: 600; color: #94a3b8;">1. Hedef Kanal Seçin</label>
-    <select id="gemini-plan-channel-select" style="background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 8px 10px; border-radius: 8px; font-size: 13.5px; outline: none; cursor: pointer;"></select>
-  `;
-  modal.appendChild(group);
+  modalBody.appendChild(retroNotice);
 
   const countGroup = document.createElement("div");
-  countGroup.style.cssText = `display: flex; flex-direction: column; gap: 6px;`;
+  countGroup.id = "gemini-plan-count-group";
+  countGroup.style.cssText = `display: ${geminiPlanExecutionMode === "story" ? "none" : "flex"}; flex-direction: column; gap: 5px;`;
   countGroup.innerHTML = `
     <label id="gemini-plan-count-label" style="font-size: 12px; font-weight: 600; color: #94a3b8;">
       ${geminiPlanExecutionMode === "retro" ? "2. İşlenecek Konu Sayısı (Her Kanal İçin)" : "2. Planlanacak Konu Sayısı"}
     </label>
-    <input type="number" id="gemini-plan-count-input" value="5" min="1" max="25" style="background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 8px 10px; border-radius: 8px; font-size: 13.5px; outline: none;" />
+    <input type="number" id="gemini-plan-count-input" value="5" min="1" max="25" style="background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 7px 10px; border-radius: 8px; font-size: 13px; outline: none;" />
   `;
-  modal.appendChild(countGroup);
+  modalBody.appendChild(countGroup);
 
   const materialsOptionGroup = document.createElement("div");
   materialsOptionGroup.id = "gemini-plan-materials-opt-group";
-  materialsOptionGroup.style.cssText = `display: ${geminiPlanExecutionMode === "new" ? "flex" : "none"}; flex-direction: column; gap: 6px;`;
+  materialsOptionGroup.style.cssText = `display: ${geminiPlanExecutionMode === "new" ? "flex" : "none"}; flex-direction: column; gap: 5px;`;
   materialsOptionGroup.innerHTML = `
-    <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; cursor: pointer; color: #38bdf8; background: rgba(56, 189, 248, 0.08); padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(56, 189, 248, 0.25);">
+    <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; cursor: pointer; color: #38bdf8; background: rgba(56, 189, 248, 0.08); padding: 7px 9px; border-radius: 8px; border: 1px solid rgba(56, 189, 248, 0.25);">
       <input type="checkbox" id="gemini-plan-full-materials-chk" checked style="accent-color: #38bdf8; margin-top: 2px;">
       <div>
         <strong style="display: block; color: #f8fafc;">Eksiksiz Senaryo & Üretim Materyalleri Üret</strong>
@@ -10458,10 +10537,84 @@ function openGeminiPlanModal() {
       </div>
     </label>
   `;
-  modal.appendChild(materialsOptionGroup);
+  modalBody.appendChild(materialsOptionGroup);
+
+  const storySection = document.createElement("div");
+  storySection.id = "gemini-plan-story-section";
+  storySection.style.cssText = `
+    display: ${geminiPlanExecutionMode === "story" ? "flex" : "none"}; flex-direction: column; gap: 8px;
+  `;
+  storySection.innerHTML = `
+    <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 8px; padding: 6px 9px; font-size: 11px; line-height: 1.4; color: #fbbf24;">
+      <strong>📖 Hikaye & Masal Atölyesi:</strong> Hikayenizi yazın veya sistemden taslak seçin. Seri bölüm sayısını belirleyin; Gemini hikayeyi part part geliştirir ve son bölümde <strong>kesinlikle nihayete erdirir</strong>.
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 3px;">
+      <label style="font-size: 11.5px; font-weight: 600; color: #94a3b8;">Kayıtlı Taslak Seçin</label>
+      <select id="gemini-story-draft-select" style="background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 6px 8px; border-radius: 8px; font-size: 12px; outline: none; cursor: pointer;">
+        <option value="new">✨ [Yeni Hikaye Taslağı Yaz]</option>
+      </select>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 3px;">
+      <label style="font-size: 11.5px; font-weight: 600; color: #94a3b8;">Hikaye / Seri Başlığı</label>
+      <input type="text" id="gemini-story-title-input" placeholder="Örn: Alemler Arası, Kadim Fener Efsanesi..." style="background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 6px 8px; border-radius: 8px; font-size: 12px; outline: none;" />
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 3px;">
+      <label style="font-size: 11.5px; font-weight: 600; color: #94a3b8;">Hikaye Metni / Fikir Taslağınız</label>
+      <textarea id="gemini-story-raw-input" rows="3" placeholder="Hikaye fikrinizi buraya yazın (Türkçe yazabilirsiniz, kanal dili neyse son çıktı ona otomatik çevrilir)..." style="background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 6px 8px; border-radius: 8px; font-size: 11.5px; font-family: inherit; resize: vertical; min-height: 55px; max-height: 110px; outline: none;"></textarea>
+    </div>
+
+    <div style="display: flex; gap: 10px; align-items: flex-end;">
+      <div style="flex: 1; display: flex; flex-direction: column; gap: 3px;">
+        <label style="font-size: 11.5px; font-weight: 600; color: #94a3b8;">Geliştirme Yöntemi</label>
+        <div style="display: flex; gap: 8px; margin-top: 2px;">
+          <label style="display: flex; align-items: center; gap: 3px; font-size: 11px; cursor: pointer; color: #fbbf24;">
+            <input type="radio" name="gemini-story-method" value="qa" checked style="accent-color: #f59e0b;">
+            ❓ Soru-Cevap
+          </label>
+          <label style="display: flex; align-items: center; gap: 3px; font-size: 11px; cursor: pointer; color: #ec4899;">
+            <input type="radio" name="gemini-story-method" value="auto" style="accent-color: #ec4899;">
+            ⚡ Otomatik
+          </label>
+        </div>
+      </div>
+
+      <div style="width: 155px; display: flex; flex-direction: column; gap: 3px;">
+        <label style="font-size: 11.5px; font-weight: 600; color: #94a3b8;">Bölüm (Part) Sayısı</label>
+        <select id="gemini-story-parts-select" style="background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 5px 8px; border-radius: 8px; font-size: 11.5px; outline: none; cursor: pointer;">
+          <option value="1">1 Bölüm (Tek Shorts - Tam Son)</option>
+          <option value="2">2 Bölüm (Part 1 + Final)</option>
+          <option value="3" selected>3 Bölüm (⭐ Önerilen - Büyük Final)</option>
+          <option value="4">4 Bölüm (Part 1..3 + Büyük Final)</option>
+          <option value="5">5 Bölüm (Geniş Seri + Büyük Final)</option>
+          <option value="6">6 Bölüm (Geniş Seri + Büyük Final)</option>
+        </select>
+      </div>
+    </div>
+    <div id="gemini-story-parts-hint" style="font-size: 10.5px; color: #10b981; font-weight: 500; display: flex; align-items: center; gap: 4px; line-height: 1.35; background: rgba(16, 185, 129, 0.08); padding: 5px 8px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.2);">
+      <span>✓</span> <strong>3 Bölüm:</strong> Bölüm 1 ve 2 merak kancası ile biter; son <strong>Bölüm 3</strong> hikayeyi <u>kesin olarak nihayete erdirir</u> ve tamamlar.
+    </div>
+  `;
+  modalBody.appendChild(storySection);
+
+  const storyPartsSelect = storySection.querySelector("#gemini-story-parts-select");
+  const storyPartsHint = storySection.querySelector("#gemini-story-parts-hint");
+  if (storyPartsSelect && storyPartsHint) {
+    storyPartsSelect.addEventListener("change", () => {
+      const pCount = parseInt(storyPartsSelect.value, 10) || 3;
+      if (pCount === 1) {
+        storyPartsHint.innerHTML = `<span>✓</span> <strong>1 Bölüm:</strong> Tek bir Shorts videosunda hikaye başlar, doruk noktasına ulaşır ve <u>kesin olarak nihayete erer</u>.`;
+      } else {
+        storyPartsHint.innerHTML = `<span>✓</span> <strong>${pCount} Bölüm:</strong> Bölüm 1-${pCount - 1} merak kancası ile biter; son <strong>Bölüm ${pCount}</strong> hikayeyi <u>kesin olarak nihayete erdirir</u> ve tamamlar.`;
+      }
+    });
+  }
 
   const modeGroup = document.createElement("div");
-  modeGroup.style.cssText = `display: flex; flex-direction: column; gap: 6px;`;
+  modeGroup.id = "gemini-plan-mode-group";
+  modeGroup.style.cssText = `display: ${geminiPlanExecutionMode === "story" ? "none" : "flex"}; flex-direction: column; gap: 6px;`;
   modeGroup.innerHTML = `
     <label style="font-size: 12px; font-weight: 600; color: #94a3b8;">3. Sohbet Tercihi</label>
     <div style="display: flex; gap: 16px; margin-top: 4px;">
@@ -10475,10 +10628,11 @@ function openGeminiPlanModal() {
       </label>
     </div>
   `;
-  modal.appendChild(modeGroup);
+  modalBody.appendChild(modeGroup);
 
   const consoleGroup = document.createElement("div");
-  consoleGroup.style.cssText = `display: flex; flex-direction: column; gap: 6px; flex-grow: 1;`;
+  consoleGroup.id = "gemini-plan-console-group";
+  consoleGroup.style.cssText = `display: ${geminiPlanExecutionMode === "story" ? "none" : "flex"}; flex-direction: column; gap: 6px;`;
   consoleGroup.innerHTML = `
     <label style="font-size: 12px; font-weight: 600; color: #94a3b8;">İşlem Günlüğü (Console)</label>
   `;
@@ -10500,26 +10654,26 @@ function openGeminiPlanModal() {
   consoleDiv.id = "gemini-plan-console";
   consoleDiv.style.cssText = `
     background: #0f172a; border: 1px solid #334155; border-radius: 8px;
-    height: 140px; padding: 10px; overflow-y: auto; font-family: monospace;
+    height: 85px; max-height: 85px; padding: 8px 10px; overflow-y: auto; font-family: monospace;
     font-size: 11px; color: #94a3b8; display: flex; flex-direction: column;
   `;
-  consoleDiv.innerHTML = `<div style="color: #64748b;">Hazır. İçerik planlamasını başlatmak için butona tıklayın...</div>`;
+  consoleDiv.innerHTML = `<div style="color: #64748b;">Hazır. Başlatmak için butona tıklayın...</div>`;
   consoleGroup.appendChild(consoleDiv);
-  modal.appendChild(consoleGroup);
+  modalBody.appendChild(consoleGroup);
   
   geminiPlanConsole = consoleDiv;
 
   const actions = document.createElement("div");
   actions.style.cssText = `
     display: flex; gap: 10px; border-top: 1px solid rgba(255, 255, 255, 0.08);
-    padding-top: 14px; margin-top: 4px;
+    padding-top: 10px; margin-top: 6px; flex-shrink: 0;
   `;
   
   const startBtn = document.createElement("button");
   startBtn.id = "gemini-plan-start-btn";
-  startBtn.textContent = geminiPlanExecutionMode === "retro" ? "🚀 Geçmişe Dönük Materyal Üret" : "Planlamayı Başlat";
+  startBtn.textContent = geminiPlanExecutionMode === "story" ? "📖 Hikayeyi Gemini ile Geliştir" : (geminiPlanExecutionMode === "retro" ? "🚀 Geçmişe Dönük Materyal Üret" : "Planlamayı Başlat");
   startBtn.style.cssText = `
-    background: ${geminiPlanExecutionMode === "retro" ? "linear-gradient(135deg, #06b6d4, #6366f1)" : "#10b981"};
+    background: ${geminiPlanExecutionMode === "story" ? "linear-gradient(135deg, #f59e0b, #ec4899)" : (geminiPlanExecutionMode === "retro" ? "linear-gradient(135deg, #06b6d4, #6366f1)" : "#10b981")};
     color: white; border: none; padding: 10px 18px;
     border-radius: 8px; font-size: 13.5px; font-weight: 600; cursor: pointer;
     flex-grow: 1; transition: background 0.2s;
@@ -10528,6 +10682,7 @@ function openGeminiPlanModal() {
   // Mod Butonları Olay Dinleyicileri
   const newBtn = modeSwitch.querySelector("#gemini-mode-new-btn");
   const retroBtn = modeSwitch.querySelector("#gemini-mode-retro-btn");
+  const storyBtn = modeSwitch.querySelector("#gemini-mode-story-btn");
   
   newBtn.addEventListener("click", () => {
     geminiPlanExecutionMode = "new";
@@ -10535,9 +10690,18 @@ function openGeminiPlanModal() {
     newBtn.style.color = "#fff";
     retroBtn.style.background = "transparent";
     retroBtn.style.color = "#94a3b8";
+    if (storyBtn) { storyBtn.style.background = "transparent"; storyBtn.style.color = "#94a3b8"; }
     retroNotice.style.display = "none";
-    materialsOptionGroup.style.display = "flex";
-    document.getElementById("gemini-plan-count-label").textContent = "2. Planlanacak Konu Sayısı";
+    if (storySection) storySection.style.display = "none";
+    if (countGroup) countGroup.style.display = "flex";
+    if (materialsOptionGroup) materialsOptionGroup.style.display = "flex";
+    if (modeGroup) modeGroup.style.display = "flex";
+    if (consoleGroup) consoleGroup.style.display = "flex";
+    if (cleanBtn) cleanBtn.style.display = "block";
+    const chLabel = document.getElementById("gemini-plan-channel-label");
+    if (chLabel) chLabel.textContent = "1. Hedef Kanal Seçin";
+    const cLabel = document.getElementById("gemini-plan-count-label");
+    if (cLabel) cLabel.textContent = "2. Planlanacak Konu Sayısı";
     startBtn.textContent = "Planlamayı Başlat";
     startBtn.style.background = "#10b981";
     loadPlanChannelsDropdown();
@@ -10549,13 +10713,48 @@ function openGeminiPlanModal() {
     retroBtn.style.color = "#fff";
     newBtn.style.background = "transparent";
     newBtn.style.color = "#94a3b8";
+    if (storyBtn) { storyBtn.style.background = "transparent"; storyBtn.style.color = "#94a3b8"; }
     retroNotice.style.display = "block";
-    materialsOptionGroup.style.display = "none";
-    document.getElementById("gemini-plan-count-label").textContent = "2. İşlenecek Konu Sayısı (Her Kanal İçin)";
+    if (storySection) storySection.style.display = "none";
+    if (countGroup) countGroup.style.display = "flex";
+    if (materialsOptionGroup) materialsOptionGroup.style.display = "none";
+    if (modeGroup) modeGroup.style.display = "flex";
+    if (consoleGroup) consoleGroup.style.display = "flex";
+    if (cleanBtn) cleanBtn.style.display = "block";
+    const chLabel = document.getElementById("gemini-plan-channel-label");
+    if (chLabel) chLabel.textContent = "1. Hedef Kanal Seçin";
+    const cLabel = document.getElementById("gemini-plan-count-label");
+    if (cLabel) cLabel.textContent = "2. İşlenecek Konu Sayısı (Her Kanal İçin)";
     startBtn.textContent = "🚀 Geçmişe Dönük Materyal Üret";
     startBtn.style.background = "linear-gradient(135deg, #06b6d4, #6366f1)";
     loadRetroactiveChannelsDropdown();
   });
+
+  if (storyBtn) {
+    storyBtn.addEventListener("click", async () => {
+      geminiPlanExecutionMode = "story";
+      storyBtn.style.background = "linear-gradient(135deg, #f59e0b, #ec4899)";
+      storyBtn.style.color = "#fff";
+      newBtn.style.background = "transparent";
+      newBtn.style.color = "#94a3b8";
+      retroBtn.style.background = "transparent";
+      retroBtn.style.color = "#94a3b8";
+      retroNotice.style.display = "none";
+      if (countGroup) countGroup.style.display = "none";
+      if (materialsOptionGroup) materialsOptionGroup.style.display = "none";
+      if (storySection) storySection.style.display = "flex";
+      if (modeGroup) modeGroup.style.display = "none";
+      if (consoleGroup) consoleGroup.style.display = "none";
+      if (cleanBtn) cleanBtn.style.display = "none";
+      const chLabel = document.getElementById("gemini-plan-channel-label");
+      if (chLabel) chLabel.textContent = "🎯 1. Hedef Kanal (Hikaye & Masal)";
+      startBtn.textContent = "📖 Hikayeyi Gemini ile Geliştir";
+      startBtn.style.background = "linear-gradient(135deg, #f59e0b, #ec4899)";
+      await loadPlanChannelsDropdown();
+      const sel = document.getElementById("gemini-plan-channel-select");
+      if (sel) await loadStoryDraftsDropdown(sel.value);
+    });
+  }
 
   startBtn.addEventListener("click", () => {
     if (geminiPlanRunning) {
@@ -10571,11 +10770,17 @@ function openGeminiPlanModal() {
       }
       const countInput = document.getElementById("gemini-plan-count-input");
       const count = parseInt(countInput.value) || 5;
-      const useTempChat = document.querySelector('input[name="gemini-plan-chat-mode"]:checked').value === "temp";
+      const useTempChat = document.querySelector('input[name="gemini-plan-chat-mode"]:checked')?.value === "temp";
       const fullMaterials = document.getElementById("gemini-plan-full-materials-chk")?.checked ?? true;
       
       togglePlanStartButtonState(true);
-      if (geminiPlanExecutionMode === "retro") {
+      if (geminiPlanExecutionMode === "story") {
+        if (consoleGroup) {
+          consoleGroup.style.display = "flex";
+          consoleGroup.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+        runGeminiStoryAutomation(channelId, useTempChat);
+      } else if (geminiPlanExecutionMode === "retro") {
         runGeminiRetroactiveMaterialsAutomation(channelId, count, useTempChat);
       } else {
         runGeminiPlanAutomation(channelId, count, useTempChat, fullMaterials);
@@ -10614,10 +10819,23 @@ function openGeminiPlanModal() {
   modal.appendChild(actions);
   document.body.appendChild(modal);
 
-  // Kanal seçimi değiştiğinde retro bildirimini güncelle
+  // Taslak seçimi değiştiğinde form alanlarını (başlık ve metin) anında doldur
+  const draftSel = document.getElementById("gemini-story-draft-select");
+  if (draftSel) {
+    draftSel.addEventListener("change", (e) => {
+      syncStoryDraftFields(e.target.value);
+    });
+    draftSel.addEventListener("input", (e) => {
+      syncStoryDraftFields(e.target.value);
+    });
+  }
+
+  // Kanal seçimi değiştiğinde retro veya hikaye bildirimini güncelle
   const chanSelect = document.getElementById("gemini-plan-channel-select");
   chanSelect.addEventListener("change", () => {
-    if (geminiPlanExecutionMode === "retro" && geminiPlanPendingCache) {
+    if (geminiPlanExecutionMode === "story") {
+      loadStoryDraftsDropdown(chanSelect.value);
+    } else if (geminiPlanExecutionMode === "retro" && geminiPlanPendingCache) {
       const val = chanSelect.value;
       const notice = document.getElementById("gemini-plan-retro-notice");
       if (!notice) return;
@@ -10632,10 +10850,419 @@ function openGeminiPlanModal() {
     }
   });
 
-  if (geminiPlanExecutionMode === "retro") {
+  if (geminiPlanExecutionMode === "story") {
+    loadPlanChannelsDropdown().then(() => {
+      const sel = document.getElementById("gemini-plan-channel-select");
+      loadStoryDraftsDropdown(sel ? sel.value : null);
+    });
+  } else if (geminiPlanExecutionMode === "retro") {
     loadRetroactiveChannelsDropdown();
   } else {
     loadPlanChannelsDropdown();
+  }
+}
+
+async function syncStoryDraftFields(draftId) {
+  const tInput = document.getElementById("gemini-story-title-input");
+  const rInput = document.getElementById("gemini-story-raw-input");
+  if (!tInput || !rInput) return;
+
+  if (!draftId || draftId === "new") {
+    tInput.value = "";
+    rInput.value = "";
+    return;
+  }
+
+  let found = (window._cachedStoryDrafts || []).find(s => s.id === draftId);
+  if (!found || !found.raw_text) {
+    try {
+      const apiUrl = await getApiUrl();
+      const res = await fetchFromBackground(`${apiUrl}/api/stories/${draftId}`);
+      if (res && res.ok) {
+        const data = await res.json();
+        found = data.story;
+      }
+    } catch (e) {
+      console.warn("Taslak verisi sunucudan çekilemedi:", e);
+    }
+  }
+
+  if (found) {
+    tInput.value = found.title || "";
+    rInput.value = found.raw_text || found.plot_notes || "";
+  }
+}
+
+async function loadStoryDraftsDropdown(channelId) {
+  const draftSelect = document.getElementById("gemini-story-draft-select");
+  if (!draftSelect) return;
+  try {
+    const apiUrl = await getApiUrl();
+    const res = await fetchFromBackground(`${apiUrl}/api/stories`);
+    if (res && res.ok) {
+      const data = await res.json();
+      const stories = data.stories || [];
+      window._cachedStoryDrafts = stories;
+
+      let html = `<option value="new">✨ [Yeni Hikaye Taslağı Yaz]</option>`;
+      const currentChannelStories = channelId ? stories.filter(s => s.channel_id === channelId) : stories;
+      const otherStories = channelId ? stories.filter(s => s.channel_id !== channelId) : [];
+
+      if (currentChannelStories.length > 0) {
+        if (channelId && otherStories.length > 0) {
+          html += `<optgroup label="📍 Bu Kanalın Taslakları">`;
+        }
+        currentChannelStories.forEach(s => {
+          const badge = s.status === "converted" ? "📦 Üretime Hazır" : s.status === "developed" ? "✓ Geliştirildi" : "📝 Taslak";
+          html += `<option value="${s.id}">📖 ${s.title} (${badge})</option>`;
+        });
+        if (channelId && otherStories.length > 0) {
+          html += `</optgroup>`;
+        }
+      }
+      if (channelId && otherStories.length > 0) {
+        html += `<optgroup label="📁 Diğer Kanalların Taslakları">`;
+        otherStories.forEach(s => {
+          const badge = s.status === "converted" ? "📦 Üretime Hazır" : s.status === "developed" ? "✓ Geliştirildi" : "📝 Taslak";
+          html += `<option value="${s.id}">📖 ${s.title} [${s.channel_id}] (${badge})</option>`;
+        });
+        html += `</optgroup>`;
+      }
+      draftSelect.innerHTML = html;
+
+      // Eğer mevcut seçili değer varsa form alanlarını hemen senkronize et
+      if (draftSelect.value && draftSelect.value !== "new") {
+        syncStoryDraftFields(draftSelect.value);
+      }
+    }
+  } catch (err) {
+    console.warn("Hikaye taslakları listelenemedi:", err);
+  }
+}
+
+async function runGeminiStoryAutomation(channelId, useTempChat) {
+  geminiPlanRunning = true;
+  logGeminiPlan("📖 Hikaye geliştirme otomasyonu başlatıldı...", "info");
+
+  const thinkingBar = document.getElementById("gemini-plan-thinking-bar");
+  if (thinkingBar) thinkingBar.style.display = "block";
+
+  try {
+    const apiUrl = await getApiUrl();
+    const draftSelect = document.getElementById("gemini-story-draft-select");
+    const titleInput = document.getElementById("gemini-story-title-input");
+    const rawInput = document.getElementById("gemini-story-raw-input");
+    const methodInput = document.querySelector('input[name="gemini-story-method"]:checked');
+    const method = methodInput ? methodInput.value : "qa";
+
+    const draftId = draftSelect ? draftSelect.value : "new";
+    let storyTitle = (titleInput ? titleInput.value : "").trim();
+    let storyRawText = (rawInput ? rawInput.value : "").trim();
+
+    // Seçilen kayıtlı taslak varsa ve inputlar boş kalmışsa doğrudan veriden çek ve doldur
+    if (draftId && draftId !== "new") {
+      let draftObj = (window._cachedStoryDrafts || []).find(s => s.id === draftId);
+      if (!draftObj || !draftObj.raw_text) {
+        try {
+          const sRes = await fetchFromBackground(`${apiUrl}/api/stories/${draftId}`);
+          if (sRes && sRes.ok) {
+            const sData = await sRes.json();
+            draftObj = sData.story;
+          }
+        } catch (e) {
+          console.warn("Taslak detayı çekilemedi:", e);
+        }
+      }
+      if (draftObj) {
+        if (!storyTitle) storyTitle = (draftObj.title || "").trim();
+        if (!storyRawText) storyRawText = (draftObj.raw_text || draftObj.plot_notes || "").trim();
+        if (titleInput && !titleInput.value) titleInput.value = storyTitle;
+        if (rawInput && !rawInput.value) rawInput.value = storyRawText;
+      }
+    }
+
+    if (!storyRawText) {
+      logGeminiPlan("⚠️ Hata: Hikaye metni boş! Lütfen bir taslak seçin veya hikaye taslağınızı yazın.", "error");
+      togglePlanStartButtonState(false);
+      return;
+    }
+    if (!storyTitle) {
+      storyTitle = "Gizemli Hikaye";
+    }
+
+    logGeminiPlan(`İşlenen Taslak: "${storyTitle}" (${storyRawText.length} karakter)`, "info");
+
+    // Hedef kanal dilini çek (Çıktıyı bu dilde üretmek için)
+    let channelLanguage = "tr";
+    let channelName = channelId;
+    try {
+      const chanRes = await fetchFromBackground(`${apiUrl}/api/channels`);
+      if (chanRes.ok) {
+        const cList = await chanRes.json();
+        const found = (cList || []).find(c => c.channel_id === channelId);
+        if (found) {
+          channelLanguage = found.language || "tr";
+          channelName = found.name || found.channel_id;
+        }
+      }
+    } catch (e) {}
+
+    const langUpper = channelLanguage.toUpperCase();
+    logGeminiPlan(`Hedef Kanal: ${channelName} | Hedef Yayın Dili: ${langUpper} (${channelLanguage})`, "info");
+
+    // Yeni taslak ise backend'e kaydet
+    let activeStoryId = draftId;
+    if (draftId === "new") {
+      try {
+        const createRes = await fetchFromBackground(`${apiUrl}/api/stories`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            channel_id: channelId,
+            title: storyTitle,
+            raw_text: storyRawText,
+            target_language: channelLanguage,
+          })
+        });
+        if (createRes.ok) {
+          const cData = await createRes.json();
+          activeStoryId = cData.story?.id;
+          logGeminiPlan(`Taslak sisteme kaydedildi: ${storyTitle} (${activeStoryId})`, "success");
+          loadStoryDraftsDropdown(channelId);
+        }
+      } catch (e) {
+        logGeminiPlan("Taslak kaydedilirken uyarı: " + e.message, "warning");
+      }
+    }
+
+    await toggleTemporaryChatIfNeeded(useTempChat);
+
+    const partsSelect = document.getElementById("gemini-story-parts-select");
+    const targetParts = parseInt(partsSelect?.value, 10) || 3;
+
+    if (method === "qa") {
+      // 1. MOD: Soru-Cevap ile Adım Adım Geliştir
+      logGeminiPlan(`Soru-Cevap koçluğu (Tam ${targetParts} Bölümlük Seri) Gemini'a iletiliyor...`, "info");
+      const qaPrompt = `Sen YouTube Shorts formatında viral kurgu ve hikaye anlatımı konusunda uzman kıdemli bir senarist ve hikaye mimarısın.
+Aşağıda bir YouTube kanalı için kullanıcı tarafından yazılmış bir hikaye taslağı yer alıyor.
+
+HEDEF KANAL BİLGİLERİ:
+Kanal Adı: ${channelName}
+Kategori: Hikaye & Masal (Storytelling)
+HEDEF YAYIN DİLİ: ${langUpper} (${channelLanguage})
+HEDEF BÖLÜM SAYISI: TAM ${targetParts} BÖLÜM (${targetParts === 1 ? "Tek Shorts videosu" : "Part 1'den Part " + targetParts + "'ye kadar"})
+
+KULLANICININ HİKAYE TASLAĞI:
+Başlık: "${storyTitle}"
+Taslak Metni:
+"${storyRawText}"
+
+GÖREVİN (AŞAMA 1 - DİYALOG & SORU-CEVAP):
+Bu hikayeyi izleyiciyi ekrana kilitleyen, tam ${targetParts} bölümlük dikey bir YouTube Shorts animasyon serisine dönüştüreceğiz.
+${targetParts > 1 ? `EN ÖNEMLİ KURAL: Seri Part ${targetParts}'de KESİNLİKLE NİHAYETE ERMELİ, hikayedeki tüm sırlar/çatışmalar çözülmeli ve izleyiciye eksiksiz, tatmin edici bir son sunulmalıdır. Asla ucu açık veya havada bırakılmamalıdır!` : `EN ÖNEMLİ KURAL: Bu tek bölümlük Shorts videosu başından sonuna kadar eksiksiz olmalı ve hikayeyi kesin olarak nihayete erdirmelidir!`}
+
+Hikayenin dramatik kurgusunu, ilk 3 saniyedeki merak kancasını (hook), ara bölümlerdeki gerilimi ve Bölüm ${targetParts}'deki BÜYÜK FİNALİ (nihayete erdirme) mükemmelleştirmek için:
+
+Bana TAM OLARAK 3 ADET yönlendirici ve kritik soru sor:
+1. Soru: Açılış kancası (hook) ve ana gizem/çatışma hakkında.
+2. Soru: Dönüm noktası ve karakterin karşılaşacağı en büyük zorluk hakkında.
+3. Soru: Bölüm ${targetParts}'deki BÜYÜK ÇÖZÜLÜŞ (final / nihayete erdirme): Hikayenin ana gizemi nasıl çözülecek ve hikaye nasıl unutulmaz bir sonla tamamlanacak?
+
+Sorularını net, ilham verici ve samimi bir dille yönelt. Yanıtlarımla birlikte hikayeyi kusursuz hale getireceğiz.`;
+
+      const inputArea = await waitForPromptInput();
+      if (!inputArea) throw new Error("Prompt giriş alanı bulunamadı.");
+      simulateTyping(inputArea, qaPrompt);
+      await new Promise(r => setTimeout(r, 500));
+      clickSendButton();
+      logGeminiPlan("✓ Hikaye geliştirme soruları Gemini'a gönderildi! Gemini penceresinden yanıtlayarak hikayeyi zenginleştirebilirsiniz.", "success");
+      togglePlanStartButtonState(false);
+      return;
+    }
+
+    // 2. MOD: Otomatik Tamamla & Belirlenen Part Sayısına Bölüp Nihayete Erdir
+    logGeminiPlan(`Gemini ile otomatik senaryo ve tam ${targetParts} bölümlük (Part 1..${targetParts}) kurgu üretiliyor...`, "info");
+
+    let partsSchemaExamples = [];
+    for (let p = 1; p <= targetParts; p++) {
+      const isFinal = (p === targetParts);
+      if (isFinal) {
+        partsSchemaExamples.push(`    {
+      "part_number": ${p},
+      "part_title": "Part ${p} (BÜYÜK FİNAL - ÇÖZÜM) (${channelLanguage} dilinde)",
+      "is_final": true,
+      "hook": "Final bölümü kancası (${channelLanguage} dilinde)",
+      "cliffhanger": "Hikaye sonu kapanış mesajı (${channelLanguage} dilinde, Örn: The End / İzlediğiniz için teşekkürler)",
+      "scenes": [
+        {
+          "scene_num": 1,
+          "narration": "Sahne 1 seslendirme metni (${channelLanguage} dilinde, ~25-30 kelime)",
+          "caption": "Sahne altyazısı (${channelLanguage} dilinde)",
+          "image_prompt": "Cinematic procedural art, 9:16 vertical, climax",
+          "camera_effect": "zoom_in",
+          "duration_sec": 12
+        },
+        {
+          "scene_num": 2,
+          "narration": "Sahne 2 seslendirme metni (${channelLanguage} dilinde)",
+          "caption": "Sahne altyazısı (${channelLanguage} dilinde)",
+          "image_prompt": "Cinematic procedural art, revealing the truth",
+          "camera_effect": "pan_left",
+          "duration_sec": 12
+        },
+        {
+          "scene_num": 3,
+          "narration": "Sahne 3 seslendirme metni (${channelLanguage} dilinde)",
+          "caption": "Sahne altyazısı (${channelLanguage} dilinde)",
+          "image_prompt": "Cinematic procedural art, resolving the conflict",
+          "camera_effect": "zoom_out",
+          "duration_sec": 12
+        },
+        {
+          "scene_num": 4,
+          "narration": "Sahne 4 KESİN ÇÖZÜM VE SON seslendirme metni (${channelLanguage} dilinde - Hikayedeki tüm gizemi çözen, konuyu kesinlikle nihayete erdiren güçlü kapanış anlatımı)",
+          "caption": "Sahne altyazısı (${channelLanguage} dilinde)",
+          "image_prompt": "Cinematic procedural art, ultimate peaceful or epic resolution",
+          "camera_effect": "zoom_in",
+          "duration_sec": 12
+        }
+      ]
+    }`);
+      } else {
+        partsSchemaExamples.push(`    {
+      "part_number": ${p},
+      "part_title": "Part ${p} Başlığı (${channelLanguage} dilinde)",
+      "is_final": false,
+      "hook": "Bölüm kancası (${channelLanguage} dilinde)",
+      "cliffhanger": "Bölüm sonu merak cümlesi (${channelLanguage} dilinde, Örn: Part ${p + 1} için takipte kalın...)",
+      "scenes": [
+        {
+          "scene_num": 1,
+          "narration": "Sahne 1 seslendirme metni (${channelLanguage} dilinde, ~25-30 kelime)",
+          "caption": "Sahne altyazısı (${channelLanguage} dilinde)",
+          "image_prompt": "Cinematic procedural art, 9:16 vertical, atmospheric",
+          "camera_effect": "zoom_in",
+          "duration_sec": 12
+        },
+        {
+          "scene_num": 2,
+          "narration": "Sahne 2 seslendirme metni (${channelLanguage} dilinde)",
+          "caption": "Sahne altyazısı (${channelLanguage} dilinde)",
+          "image_prompt": "Cinematic procedural art",
+          "camera_effect": "pan_left",
+          "duration_sec": 12
+        },
+        {
+          "scene_num": 3,
+          "narration": "Sahne 3 seslendirme metni (${channelLanguage} dilinde)",
+          "caption": "Sahne altyazısı (${channelLanguage} dilinde)",
+          "image_prompt": "Cinematic procedural art",
+          "camera_effect": "zoom_out",
+          "duration_sec": 12
+        },
+        {
+          "scene_num": 4,
+          "narration": "Sahne 4 seslendirme metni (${channelLanguage} dilinde - Part ${p + 1}'e bağlayan gerilim)",
+          "caption": "Sahne altyazısı (${channelLanguage} dilinde)",
+          "image_prompt": "Cinematic procedural art, cliffhanger",
+          "camera_effect": "zoom_in",
+          "duration_sec": 12
+        }
+      ]
+    }`);
+      }
+    }
+
+    const autoPrompt = `Sen YouTube Shorts formatında viral kurgu, sinematik animasyon ve procedural görsel hikaye anlatımı konusunda uzman kıdemli bir senarist ve yönetmensin.
+
+Aşağıda kullanıcı tarafından yazılmış hikaye taslağını alarak, izleyiciyi ekrana kilitleyen, TAM OLARAK ${targetParts} BÖLÜMDEN OLUŞAN (${targetParts === 1 ? "Tek Bölümlük Shorts" : "Part 1'den Part " + targetParts + "'ye kadar"}) bir YouTube Shorts serisi senaryosuna dönüştürmeni istiyorum.
+
+KANAL VE HEDEF DİL BİLGİLERİ:
+Kanal Adı: ${channelName}
+Kategori: Hikaye & Masal (Storytelling)
+HEDEF YAYIN DİLİ: ${langUpper} (${channelLanguage})
+HEDEF BÖLÜM SAYISI: TAM ${targetParts} BÖLÜM (Eksiksiz ${targetParts} adet part üretilecektir)
+
+KRİTİK VE KESİN KURALLAR:
+1. HİKAYEYİ NİHAYETE ERDİRME (EN ÖNEMLİ KURAL):
+   - Hikayeyi TAM OLARAK ${targetParts} BÖLÜME yay.
+   ${targetParts > 1 ? `- Part 1 ile Part ${targetParts - 1} arasındaki bölümler bir sonraki bölüme merak uyandıran güçlü bir kanca ve cliffhanger ile bitmelidir.` : ''}
+   - SON BÖLÜM (BÖLÜM ${targetParts}) KESİNLİKLE HİKAYENİN NİHAYETİ VE BÜYÜK FİNALİDİR! Hikayedeki tüm sırlar çözülmeli, ana karakterin kaderi ve gizem sonuca bağlanmalı, hikaye tam bir çözüme (resolution / closure) kavuşmalıdır. Asla ucu açık, yarım veya "devamı sonraki bölümde" şeklinde bırakılmamalıdır! Son sahnenin anlatımı hikayenin nihayete erdiğini hissettiren tatmin edici bir kapanış cümlesiyle bitmelidir.
+2. HEDEF DİL KURALI (ZORUNLU):
+   Kullanıcının taslağı hangi dilde yazılmış olursa olsun (örneğin Türkçe), kanalın dili ${langUpper} (${channelLanguage}) olduğu için; SENARYONUN TÜM BAŞLIKLARI ('series_title', 'part_title'), ANLATICI SESLENDİRME METİNLERİ ('narration'), ALTYAZILARI ('caption'), KANCA SORUSU ('hook') VE BÖLÜM SONU CÜMLELERİ ('cliffhanger') EKSİKSİZ OLARAK ${langUpper} DİLİNDE OLMALIDIR!
+3. SAHNE SAYISI VE SÜRE:
+   Her bölüm için tam 4 sahne üret (her sahne ~12 saniye, toplam bölüm süresi ~48 saniye). Anlatım metinleri akıcı, sürükleyici ve edebi olmalıdır.
+4. GÖRSEL ANİMASYON STİLİ:
+   Instagram @meraklisinaa.tv tarzında kodla, sıfırdan çizilen son derece estetik, karanlık atmosferik dikey animasyon estetiği (derin gradyan, parıldayan parçacıklar ve hikaye konusuna uygun merkezi parlayan ikonik vektörel motif: masal ve öyküler için kadim fener ve ateşböcekleri, gotik/gizem hikayeleri için saat kulesi ve dev ay, büyülü efsaneler için sihirli portal, bilimkurgu için uzay aracı veya halkalı gezegen). Görsel promptlar detaylı İngilizce olmalıdır.
+
+KULLANICI TASLAĞI:
+Başlık: "${storyTitle}"
+Taslak:
+"${storyRawText}"
+
+KESİN JSON ŞEMASI (Yanıtında YALNIZCA bu JSON objesini döndür, markdown veya başka metin ekleme):
+{
+  "series_title": "Dizi Ana Başlığı (${channelLanguage} dilinde)",
+  "target_language": "${channelLanguage}",
+  "total_parts": ${targetParts},
+  "hook": "İlk ekranda belirecek çarpıcı kanca sorusu (${channelLanguage} dilinde)",
+  "synopsis": "Genel hikaye özeti",
+  "parts": [
+${partsSchemaExamples.join(",\n")}
+  ]
+}`;
+
+    const inputArea = await waitForPromptInput();
+    if (!inputArea) throw new Error("Prompt alanı bulunamadı.");
+    simulateTyping(inputArea, autoPrompt);
+    await new Promise(r => setTimeout(r, 500));
+    const initialTurns = getTurnCount();
+    clickSendButton();
+    logGeminiPlan("Senaryo talebi gönderildi. Gemini'ın yanıtı bekleniyor...", "info");
+
+    await waitForGeminiGeneration(initialTurns);
+    logGeminiPlan("Gemini yanıtı alındı, JSON ayrıştırılıyor...", "success");
+
+    const rawResp = getLastResponseText();
+    let jsonMatch = rawResp.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error("Gemini geçerli bir JSON yanıtı döndürmedi.");
+    const developedJson = JSON.parse(jsonMatch[0]);
+
+    if (!developedJson.total_parts) {
+      developedJson.total_parts = (developedJson.parts || []).length || targetParts;
+    }
+
+    if (activeStoryId && activeStoryId !== "new") {
+      logGeminiPlan(`Hikaye taslağı güncelleniyor (${activeStoryId})...`, "info");
+      await fetchFromBackground(`${apiUrl}/api/stories/${activeStoryId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: developedJson.series_title || storyTitle,
+          developed_story: developedJson,
+          status: "developed"
+        })
+      });
+
+      // Üretim materyallerine dönüştür
+      logGeminiPlan("Üretim Materyallerine (material.json) dönüştürülüyor...", "info");
+      const convRes = await fetchFromBackground(`${apiUrl}/api/stories/${activeStoryId}/convert-to-material`, {
+        method: "POST"
+      });
+      if (convRes.ok) {
+        const convData = await convRes.json();
+        const totalP = convData.data?.total_parts || (developedJson.parts || []).length;
+        logGeminiPlan(`🎉 BAŞARILI! Hikaye ${totalP} bölüm (Part 1, Part 2...) halinde 'Üretim Metaryalleri'ne kaydedildi!`, "success");
+        logGeminiPlan("Web panelinden veya tek tıkla animasyon üretimini başlatabilirsiniz.", "info");
+      }
+    }
+  } catch (err) {
+    logGeminiPlan("Hikaye otomasyon hatası: " + err.message, "error");
+  } finally {
+    geminiPlanRunning = false;
+    togglePlanStartButtonState(false);
+    const thinkingBar = document.getElementById("gemini-plan-thinking-bar");
+    if (thinkingBar) thinkingBar.style.display = "none";
   }
 }
 
@@ -10649,6 +11276,9 @@ function togglePlanStartButtonState(running) {
       if (geminiPlanExecutionMode === "retro") {
         btn.textContent = "🚀 Geçmişe Dönük Materyal Üret";
         btn.style.background = "linear-gradient(135deg, #06b6d4, #6366f1)";
+      } else if (geminiPlanExecutionMode === "story") {
+        btn.textContent = "📖 Hikayeyi Gemini ile Geliştir";
+        btn.style.background = "linear-gradient(135deg, #f59e0b, #ec4899)";
       } else {
         btn.textContent = "Planlamayı Başlat";
         btn.style.background = "#10b981";
@@ -10874,6 +11504,13 @@ async function loadPlanChannelsDropdown() {
           html += `</optgroup>`;
         }
         select.innerHTML = html;
+        if (geminiPlanExecutionMode === "story") {
+          const storyCh = standalones.find(c => c.topic_category === "story" || c.id === "ch_story_tr");
+          if (storyCh) {
+            select.value = storyCh.id;
+          }
+          loadStoryDraftsDropdown(select.value);
+        }
       } else {
         select.innerHTML = "<option value=''>Kanal veya grup bulunamadı.</option>";
       }
@@ -11044,6 +11681,34 @@ KANAL KONSEPTİ VE KATEGORİSİ: "${(channelCategory || "Genel").toUpperCase()}"
 
     let promptText = "";
 
+    const bgmGuideTr = `
+3. FON MÜZİĞİ VE DUYGU ZAMAN ÇİZELGESİ (bgm_timeline - ZORUNLU):
+Videodaki dramatik gerilim, mizah ve kriz akışına göre dakika dakika arka plan müziğini belirle. KESİNLİKLE YouTube Audio Library'nin telifsiz ve ATIF GEREKTİRMEYEN (No attribution required) şu parça ID'lerinden seç:
+- "schizo": Gergin, tempolu dramatik hip hop / entrika / skandal
+- "dramatic_suspense": Yüksek gerilim, gizemli ve tehlike anları
+- "timeturner": Sayaç, acil durum, kilitlenme, zamanla yarış
+- "underworld": Karanlık felaket, kaza kırım, motor arızası, çöküş
+- "borderless": Resmi NTSB raporları, derin teknik analiz, sakin piyano
+- "sneaky_snitch": Askeri ihale mizahı, Pentagon bütçe israfı ve kurnazlık
+- "space_walk": Sinematik derin bilim, uzay, fütüristik vizyon
+- "desert_caravan": Keşif, çöl operasyonları, askeri tatbikat
+- "lofi_storyteller": Sakin anlatı, itiraf, durum hikayesi
+- "sunny_days": Günlük yaşam, giriş ve kapanış rahatlaması`;
+
+    const bgmGuideEn = `
+3. BACKGROUND MUSIC TIMELINE (bgm_timeline - MANDATORY):
+Map out the audio mood minute-by-minute across the entire video. You MUST strictly select from YouTube Audio Library's NO-ATTRIBUTION tracks (safe for monetization, no attribution text required in description):
+- "schizo": Fast-paced dramatic hip hop / conspiracy / defense scandal
+- "dramatic_suspense": High stakes, dark mystery, tense build-up
+- "timeturner": Countdown urgency, ticking clock, emergency alarm, flameout
+- "underworld": Disaster, crash investigation, catastrophe, wreckage
+- "borderless": Official NTSB reports, deep forensic breakdown, reflective piano
+- "sneaky_snitch": Satirical humor, Pentagon contractor corruption, cunning schemes
+- "space_walk": Deep cinematic sci-fi, aeronautics, horizon
+- "desert_caravan": Military field exercise, desert operations
+- "lofi_storyteller": Calm narration, stories, confessions
+- "sunny_days": Relaxed intro/outro chill vibe`;
+
     if (effectiveFullMaterials) {
       if (isCrayonEssay) {
         promptText = isTrLang
@@ -11053,9 +11718,10 @@ Aşağıda bilgileri verilen YouTube kanalı için tam olarak ${count} adet yeni
 ÖNEMLİ VE TAVİZSİZ KURALLAR:
 1. SÜRE VE SAHNE KURALI (KRİTİK): Her bir içerik için KESİNLİKLE EN AZ 32, EN FAZLA 42 SAHNE üret. Toplam anlatım süresi KESİNLİKLE 11 ila 15 dakika arasında (~2200-2500 kelime) olmalıdır. 32 sahneden az KESİNLİKLE ÜRETME.
 2. AÇIKLAMA VE ETİKETLER (ZORUNLU): 'description' (150-250 kelimelik zengin YouTube açıklaması, araç bilgileri ve #hashtag'ler) ve 'tags' (12-15 adet zengin etiket) alanları %100 ZORUNLUDUR. Asla boş bırakma.
-3. HİCİV KARAKTERLERİ: Her sahnede 4 hiciv arketipinden birini ([DEFENSE_CEO], [GENERAL], [PILOT], [SPY]) ve komik bir repliğini ('character_quote') dahil et.
-4. GÖRSELLER: "blueprint_spec" (taktik cyan blueprint teknik şeması) veya "stickman_reaction" (beyaz fonda dış hatları kalın karikatür çöp adam) görsel tiplerini kullan.
-5. Yanıtını KESİNLİKLE SADECE geçerli bir JSON array formatında ver. Başka hiçbir açıklama veya markdown ekleme.
+${bgmGuideTr}
+4. HİCİV KARAKTERLERİ: Her sahnede 4 hiciv arketipinden birini ([DEFENSE_CEO], [GENERAL], [PILOT], [SPY]) ve komik bir repliğini ('character_quote') dahil et.
+5. GÖRSELLER: "blueprint_spec" (taktik cyan blueprint teknik şeması) veya "stickman_reaction" (beyaz fonda dış hatları kalın karikatür çöp adam) görsel tiplerini kullan.
+6. Yanıtını KESİNLİKLE SADECE geçerli bir JSON array formatında ver. Başka hiçbir açıklama veya markdown ekleme.
 
 Kanal / Grup Adı: ${channelName || targetId}
 Kategori: ${channelCategory}
@@ -11084,6 +11750,12 @@ HER BİR İÇERİK İÇİN DÖNÜLECEK KESİN JSON ŞEMASI:
         "primary_flaw": "Kask ekranı boyun ağrısına ve yazılım kilitlenmesine yol açıyor"
       },
       "style_prompt": "Crayon Combat vector cartoon stick figures, dark cyan tactical blueprint schematics, high contrast military briefing",
+      "bgm_timeline": [
+        { "start_time": "00:00", "end_time": "03:30", "track_id": "sneaky_snitch", "mood": "Satirical Humor / Introduction", "attribution": "No attribution required" },
+        { "start_time": "03:30", "end_time": "07:15", "track_id": "schizo", "mood": "Rising Tension & Engineering Flaw", "attribution": "No attribution required" },
+        { "start_time": "07:15", "end_time": "10:45", "track_id": "timeturner", "mood": "Emergency Lockdown & Crisis", "attribution": "No attribution required" },
+        { "start_time": "10:45", "end_time": "13:50", "track_id": "borderless", "mood": "Audit Investigation & Verdict", "attribution": "No attribution required" }
+      ],
       "scenes": [
         {
           "scene_num": 1,
@@ -11116,9 +11788,10 @@ Generate exactly ${count} unique, viral military hardware breakdown topics AND C
 CRITICAL & UNCOMPROMISING RULES:
 1. DURATION & SCENES (STRICT): Provide STRICTLY between 32 and 42 scenes per topic. Total spoken narration MUST be strictly between 11 and 15 minutes (approx 2,100 to 2,500 words total across all scenes). NEVER generate fewer than 32 scenes!
 2. MANDATORY DESCRIPTION & TAGS: The 'description' (150-250 words with vehicle intel & hashtags) and 'tags' (12-15 items) fields are 100% MANDATORY in the JSON output. Never leave them empty or omit them.
-3. CHARACTER REACTIONS: Incorporate character reactions from the 4 satirical archetypes: [DEFENSE_CEO], [GENERAL], [PILOT], [SPY] along with their 'character_quote'.
-4. VISUAL TYPES: Alternate between "blueprint_spec" (technical HUD / blueprint schematics) and "stickman_reaction" (expressive cartoon stick figures on pure white background).
-5. Respond ONLY with a valid JSON array. No markdown fences, no commentary.
+${bgmGuideEn}
+4. CHARACTER REACTIONS: Incorporate character reactions from the 4 satirical archetypes: [DEFENSE_CEO], [GENERAL], [PILOT], [SPY] along with their 'character_quote'.
+5. VISUAL TYPES: Alternate between "blueprint_spec" (technical HUD / blueprint schematics) and "stickman_reaction" (expressive cartoon stick figures on pure white background).
+6. Respond ONLY with a valid JSON array. No markdown fences, no commentary.
 
 Channel / Group Name: ${channelName || targetId}
 Category: ${channelCategory}
@@ -11147,6 +11820,12 @@ STRICT JSON SCHEMA FOR EACH TOPIC:
         "primary_flaw": "Helmet display causes neck strain & software freezes"
       },
       "style_prompt": "Crayon Combat vector cartoon stick figures, dark cyan tactical blueprint schematics, high contrast military briefing",
+      "bgm_timeline": [
+        { "start_time": "00:00", "end_time": "03:30", "track_id": "sneaky_snitch", "mood": "Satirical Humor / Introduction", "attribution": "No attribution required" },
+        { "start_time": "03:30", "end_time": "07:15", "track_id": "schizo", "mood": "Rising Tension & Engineering Flaw", "attribution": "No attribution required" },
+        { "start_time": "07:15", "end_time": "10:45", "track_id": "timeturner", "mood": "Emergency Lockdown & Crisis", "attribution": "No attribution required" },
+        { "start_time": "10:45", "end_time": "13:50", "track_id": "borderless", "mood": "Audit Investigation & Verdict", "attribution": "No attribution required" }
+      ],
       "scenes": [
         {
           "scene_num": 1,
@@ -11178,7 +11857,7 @@ ${mindMapJson}`;
       } else {
         promptText = isTrLang
           ? `Sen YouTube içerik planlama ve video senaryo mimarısın.
-Aşağıda bilgileri verilen YouTube kanalı/grubu için tam olarak ${count} adet yeni, özgün, viral içerik konusu VE HER BİRİNİN EKSİKSİZ VİDEO SENARYO MATERYALLERİNİ (script: başlık, açıklama, etiketler, görsel stili, sahne sahne anlatım metinleri ve Stable Diffusion görsel promptları) üretmeni istiyorum.
+Aşağıda bilgileri verilen YouTube kanalı/grubu için tam olarak ${count} adet yeni, özgün, viral içerik konusu VE HER BİRİNİN EKSİKSİZ VİDEO SENARYO MATERYALLERİNİ (script: başlık, açıklama, etiketler, görsel stili, sahne sahne anlatım metinleri, arka plan fon müziği zaman çizelgesi ve Stable Diffusion görsel promptları) üretmeni istiyorum.
 
 Kanal / Grup Adı: ${channelName || targetId}
 Kategori: ${channelCategory}
@@ -11186,6 +11865,7 @@ Yayın Dili: ${channelLanguage}
 ${categoryGuide}
 ${customTopicsPrompt}
 ${existingTitlesPrompt}
+${bgmGuideTr}
 
 HER BİR İÇERİK İÇİN DÖNÜLECEK KESİN JSON ŞEMASI:
 [
@@ -11199,6 +11879,10 @@ HER BİR İÇERİK İÇİN DÖNÜLECEK KESİN JSON ŞEMASI:
       "tags": ["etiket1", "etiket2", "etiket3", "etiket4"],
       "keywords": ["anahtar1", "anahtar2"],
       "style_prompt": "Tüm sahnelere uygulanacak tutarlı İngilizce görsel stili (Örn: Photorealistic cinematic documentary footage, 8k resolution, dramatic lighting)",
+      "bgm_timeline": [
+        { "start_time": "00:00", "end_time": "02:30", "track_id": "lofi_storyteller", "mood": "Calm Introduction", "attribution": "No attribution required" },
+        { "start_time": "02:30", "end_time": "06:00", "track_id": "dramatic_suspense", "mood": "Suspense & Building Mystery", "attribution": "No attribution required" }
+      ],
       "scenes": [
         {
           "scene_num": 1,
@@ -11229,12 +11913,12 @@ HER BİR İÇERİK İÇİN DÖNÜLECEK KESİN JSON ŞEMASI:
   }
 ]
 
-ÖNEMLİ KURAL: Her içerik için tam ${targetScenes} sahne üret (${durationDesc} süresinde). Açıklama ('description') ve etiketler ('tags') alanları %100 zorunludur. Yanıtını KESİNLİKLE SADECE geçerli bir JSON array formatında ver. Başka hiçbir açıklama veya markdown ekleme.
+ÖNEMLİ KURAL: Her içerik için tam ${targetScenes} sahne üret (${durationDesc} süresinde). Açıklama ('description'), etiketler ('tags') ve 'bgm_timeline' alanları %100 zorunludur. Yanıtını KESİNLİKLE SADECE geçerli bir JSON array formatında ver. Başka hiçbir açıklama veya markdown ekleme.
 
 Zihin Haritası Verileri:
 ${mindMapJson}`
           : `You are a senior YouTube content strategist and video script architect.
-Generate exactly ${count} unique, viral, high-retention video topics AND COMPLETE VIDEO PRODUCTION SCRIPTS (title, description, tags, keywords, style_prompt, and full scene-by-scene narrations and Stable Diffusion image prompts) for the channel below.
+Generate exactly ${count} unique, viral, high-retention video topics AND COMPLETE VIDEO PRODUCTION SCRIPTS (title, description, tags, keywords, style_prompt, bgm_timeline, and full scene-by-scene narrations and Stable Diffusion image prompts) for the channel below.
 
 Channel / Group Name: ${channelName || targetId}
 Category: ${channelCategory}
@@ -11242,6 +11926,7 @@ Language: ${channelLanguage}
 ${categoryGuide}
 ${customTopicsPrompt}
 ${existingTitlesPrompt}
+${bgmGuideEn}
 
 STRICT JSON SCHEMA FOR EACH TOPIC:
 [
@@ -11255,6 +11940,10 @@ STRICT JSON SCHEMA FOR EACH TOPIC:
       "tags": ["tag1", "tag2", "tag3"],
       "keywords": ["keyword1", "keyword2"],
       "style_prompt": "Consistent visual style prompt in English (e.g., Cinematic photorealistic documentary, 8k, dramatic lighting)",
+      "bgm_timeline": [
+        { "start_time": "00:00", "end_time": "02:30", "track_id": "lofi_storyteller", "mood": "Calm Narration Intro", "attribution": "No attribution required" },
+        { "start_time": "02:30", "end_time": "06:00", "track_id": "dramatic_suspense", "mood": "Rising Tension & Climax", "attribution": "No attribution required" }
+      ],
       "scenes": [
         {
           "scene_num": 1,
@@ -11285,7 +11974,7 @@ STRICT JSON SCHEMA FOR EACH TOPIC:
   }
 ]
 
-Provide exactly ${targetScenes} scenes per topic (total duration ${durationDesc}). The 'description' and 'tags' fields are mandatory. Respond ONLY with a valid JSON array. No markdown fences, no commentary.
+Provide exactly ${targetScenes} scenes per topic (total duration ${durationDesc}). The 'description', 'tags' and 'bgm_timeline' fields are mandatory. Respond ONLY with a valid JSON array. No markdown fences, no commentary.
 
 Mind Map Data:
 ${mindMapJson}`;
@@ -11460,6 +12149,34 @@ function buildRetroactivePrompt(channel, items) {
     notlar: String(it.notlar || "").trim()
   }));
 
+  const bgmGuideTr = `
+FON MÜZİĞİ VE DUYGU ZAMAN ÇİZELGESİ (bgm_timeline - ZORUNLU):
+Videodaki dramatik gerilim, mizah ve kriz akışına göre dakika dakika arka plan müziğini belirle. KESİNLİKLE YouTube Audio Library'nin telifsiz ve ATIF GEREKTİRMEYEN (No attribution required) şu parça ID'lerinden seç:
+- "schizo": Gergin, tempolu dramatik hip hop / entrika / skandal
+- "dramatic_suspense": Yüksek gerilim, gizemli ve tehlike anları
+- "timeturner": Sayaç, acil durum, kilitlenme, zamanla yarış
+- "underworld": Karanlık felaket, kaza kırım, motor arızası, çöküş
+- "borderless": Resmi NTSB raporları, derin teknik analiz, sakin piyano
+- "sneaky_snitch": Askeri ihale mizahı, Pentagon bütçe israfı ve kurnazlık
+- "space_walk": Sinematik derin bilim, uzay, fütüristik vizyon
+- "desert_caravan": Keşif, çöl operasyonları, askeri tatbikat
+- "lofi_storyteller": Sakin anlatı, itiraf, durum hikayesi
+- "sunny_days": Günlük yaşam, giriş ve kapanış rahatlaması`;
+
+  const bgmGuideEn = `
+BACKGROUND MUSIC TIMELINE (bgm_timeline - MANDATORY):
+Map out the audio mood minute-by-minute across the entire video. You MUST strictly select from YouTube Audio Library's NO-ATTRIBUTION tracks (safe for monetization, no attribution text required in description):
+- "schizo": Fast-paced dramatic hip hop / conspiracy / defense scandal
+- "dramatic_suspense": High stakes, dark mystery, tense build-up
+- "timeturner": Countdown urgency, ticking clock, emergency alarm, flameout
+- "underworld": Disaster, crash investigation, catastrophe, wreckage
+- "borderless": Official NTSB reports, deep forensic breakdown, reflective piano
+- "sneaky_snitch": Satirical humor, Pentagon contractor corruption, cunning schemes
+- "space_walk": Deep cinematic sci-fi, aeronautics, horizon
+- "desert_caravan": Military field exercise, desert operations
+- "lofi_storyteller": Calm narration, stories, confessions
+- "sunny_days": Relaxed intro/outro chill vibe`;
+
   if (isCrayonEssay) {
     if (isTrLang) {
       return `Sen YouTube askeri teknoloji, savunma sanayii ve video essay mimarısın.
@@ -11469,9 +12186,10 @@ Aşağıda verilen YouTube kanalı için ZATEN MEVCUT İÇERİK PLANINDA yer ala
 1. Konuların başlığını, konusunu ve 'row_id' değerlerini KESİNLİKLE DEĞİŞTİRMEDEN KORU.
 2. SÜRE VE SAHNE KURALI (KRİTİK): Her bir içerik için KESİNLİKLE EN AZ 32, EN FAZLA 42 SAHNE üret. Toplam anlatım süresi KESİNLİKLE 11 ila 15 dakika arasında (~2200-2500 kelime) olmalıdır. 32 sahneden az KESİNLİKLE ÜRETME.
 3. AÇIKLAMA VE ETİKETLER (ZORUNLU): 'description' (150-250 kelimelik zengin YouTube açıklaması, araç bilgileri ve #hashtag'ler) ve 'tags' (12-15 adet zengin etiket) alanları %100 ZORUNLUDUR. Asla boş bırakma.
-4. HİCİV KARAKTERLERİ: Her sahnede 4 hiciv arketipinden birini ([DEFENSE_CEO], [GENERAL], [PILOT], [SPY]) ve komik bir repliğini ('character_quote') dahil et.
-5. GÖRSELLER: "blueprint_spec" (taktik cyan blueprint teknik şeması) veya "stickman_reaction" (beyaz fonda dış hatları kalın karikatür çöp adam) görsel tiplerini kullan.
-6. Çıktın KESİNLİKLE doğrudan '[' karakteri ile başlamalı ve ']' ile bitmelidir. SADECE geçerli bir JSON array üret.
+4. ${bgmGuideTr}
+5. HİCİV KARAKTERLERİ: Her sahnede 4 hiciv arketipinden birini ([DEFENSE_CEO], [GENERAL], [PILOT], [SPY]) ve komik bir repliğini ('character_quote') dahil et.
+6. GÖRSELLER: "blueprint_spec" (taktik cyan blueprint teknik şeması) veya "stickman_reaction" (beyaz fonda dış hatları kalın karikatür çöp adam) görsel tiplerini kullan.
+7. Çıktın KESİNLİKLE doğrudan '[' karakteri ile başlamalı ve ']' ile bitmelidir. SADECE geçerli bir JSON array üret.
 
 Kanal Adı: ${channelName}
 Kategori: ${channelCategory}
@@ -11501,6 +12219,12 @@ HER BİR KONU İÇİN DÖNÜLECEK KESİN JSON ŞEMASI:
         "primary_flaw": "Kask ekranı boyun ağrısına ve yazılım kilitlenmesine yol açıyor"
       },
       "style_prompt": "Crayon Combat vector cartoon stick figures, dark cyan tactical blueprint schematics, high contrast military briefing",
+      "bgm_timeline": [
+        { "start_time": "00:00", "end_time": "03:30", "track_id": "sneaky_snitch", "mood": "Satirical Humor / Introduction", "attribution": "No attribution required" },
+        { "start_time": "03:30", "end_time": "07:15", "track_id": "schizo", "mood": "Rising Tension & Engineering Flaw", "attribution": "No attribution required" },
+        { "start_time": "07:15", "end_time": "10:45", "track_id": "timeturner", "mood": "Emergency Lockdown & Crisis", "attribution": "No attribution required" },
+        { "start_time": "10:45", "end_time": "13:50", "track_id": "borderless", "mood": "Audit Investigation & Verdict", "attribution": "No attribution required" }
+      ],
       "scenes": [
         {
           "scene_num": 1,
@@ -11533,9 +12257,10 @@ CRITICAL & UNCOMPROMISING RULES:
 1. PRESERVE the exact 'row_id', 'baslik' and 'konu' values from the input list. Do not change them.
 2. DURATION & SCENES (STRICT): Provide STRICTLY between 32 and 42 scenes per topic. Total spoken narration MUST be strictly between 11 and 15 minutes (approx 2,100 to 2,500 words total across all scenes). NEVER generate fewer than 32 scenes!
 3. MANDATORY DESCRIPTION & TAGS: The 'description' (150-250 words with vehicle intel & hashtags) and 'tags' (12-15 items) fields are 100% MANDATORY in the JSON output. Never leave them empty or omit them.
-4. CHARACTER REACTIONS: Incorporate character reactions from the 4 satirical archetypes: [DEFENSE_CEO], [GENERAL], [PILOT], [SPY] along with their 'character_quote'.
-5. VISUAL TYPES: Alternate between "blueprint_spec" (technical HUD / blueprint schematics) and "stickman_reaction" (expressive cartoon stick figures on pure white background).
-6. Your output MUST start directly with '[' and end with ']'. Do NOT wrap in an outer object and do NOT output any conversational preamble.
+4. ${bgmGuideEn}
+5. CHARACTER REACTIONS: Incorporate character reactions from the 4 satirical archetypes: [DEFENSE_CEO], [GENERAL], [PILOT], [SPY] along with their 'character_quote'.
+6. VISUAL TYPES: Alternate between "blueprint_spec" (technical HUD / blueprint schematics) and "stickman_reaction" (expressive cartoon stick figures on pure white background).
+7. Your output MUST start directly with '[' and end with ']'. Do NOT wrap in an outer object and do NOT output any conversational preamble.
 
 Channel Name: ${channelName}
 Category: ${channelCategory}
@@ -11565,6 +12290,12 @@ STRICT JSON SCHEMA FOR EACH TOPIC:
         "primary_flaw": "Helmet display causes neck strain & software freezes"
       },
       "style_prompt": "Crayon Combat vector cartoon stick figures, dark cyan tactical blueprint schematics, high contrast military briefing",
+      "bgm_timeline": [
+        { "start_time": "00:00", "end_time": "03:30", "track_id": "sneaky_snitch", "mood": "Satirical Humor / Introduction", "attribution": "No attribution required" },
+        { "start_time": "03:30", "end_time": "07:15", "track_id": "schizo", "mood": "Rising Tension & Engineering Flaw", "attribution": "No attribution required" },
+        { "start_time": "07:15", "end_time": "10:45", "track_id": "timeturner", "mood": "Emergency Lockdown & Crisis", "attribution": "No attribution required" },
+        { "start_time": "10:45", "end_time": "13:50", "track_id": "borderless", "mood": "Audit Investigation & Verdict", "attribution": "No attribution required" }
+      ],
       "scenes": [
         {
           "scene_num": 1,
@@ -11593,14 +12324,15 @@ STRICT JSON SCHEMA FOR EACH TOPIC:
 
   if (isTrLang) {
     return `Sen YouTube içerik planlama ve video senaryo mimarısın.
-Aşağıda verilen YouTube kanalı için ZATEN MEVCUT İÇERİK PLANINDA yer alan ve ID'leri belirtilen tam ${items.length} adet konu için EKSİKSİZ VİDEO SENARYO MATERYALLERİNİ (script: başlık, açıklama, etiketler, keywords, görsel stili, sahne sahne anlatım metinleri ve Stable Diffusion promptları) üretmeni istiyorum.
+Aşağıda verilen YouTube kanalı için ZATEN MEVCUT İÇERİK PLANINDA yer alan ve ID'leri belirtilen tam ${items.length} adet konu için EKSİKSİZ VİDEO SENARYO MATERYALLERİNİ (script: başlık, açıklama, etiketler, keywords, görsel stili, bgm_timeline fon müziği zaman çizelgesi, sahne sahne anlatım metinleri ve Stable Diffusion promptları) üretmeni istiyorum.
 
 ÖNEMLİ KURALLAR:
 1. Konuların başlığını, konusunu ve 'row_id' değerlerini KESİNLİKLE DEĞİŞTİRMEDEN KORU.
 2. Her bir içerik için tam ${targetScenes} sahne üret (${durationDesc} süresinde kapsamlı anlatım).
 3. AÇIKLAMA VE ETİKETLER (ZORUNLU): 'description' (150-250 kelimelik zengin açıklama ve hashtagler) ve 'tags' (12-15 adet etiket) alanları %100 ZORUNLUDUR. Asla boş bırakma.
-4. Sahne anlatımlarını kanal dilinde (${channelLanguage}), Stable Diffusion görsel promptlarını ise detaylı İngilizce olarak hazırla.
-5. Çıktın KESİNLİKLE doğrudan '[' karakteri ile başlamalı ve ']' ile bitmelidir. Dışında hiçbir wrapper nesne ({"materials": ...} gibi) veya giriş/çıkış açıklaması olmamalıdır. SADECE geçerli bir JSON array üret.
+4. ${bgmGuideTr}
+5. Sahne anlatımlarını kanal dilinde (${channelLanguage}), Stable Diffusion görsel promptlarını ise detaylı İngilizce olarak hazırla.
+6. Çıktın KESİNLİKLE doğrudan '[' karakteri ile başlamalı ve ']' ile bitmelidir. Dışında hiçbir wrapper nesne ({"materials": ...} gibi) veya giriş/çıkış açıklaması olmamalıdır. SADECE geçerli bir JSON array üret.
 
 Kanal Adı: ${channelName}
 Kategori: ${channelCategory}
@@ -11622,6 +12354,10 @@ HER BİR KONU İÇİN DÖNÜLECEK KESİN JSON ŞEMASI:
       "tags": ["etiket1", "etiket2", "etiket3", "etiket4"],
       "keywords": ["anahtar1", "anahtar2"],
       "style_prompt": "Tüm sahnelere uygulanacak tutarlı İngilizce görsel stili (Örn: Photorealistic cinematic documentary footage, 8k resolution, dramatic lighting)",
+      "bgm_timeline": [
+        { "start_time": "00:00", "end_time": "02:30", "track_id": "lofi_storyteller", "mood": "Calm Introduction", "attribution": "No attribution required" },
+        { "start_time": "02:30", "end_time": "06:00", "track_id": "dramatic_suspense", "mood": "Suspense & Building Mystery", "attribution": "No attribution required" }
+      ],
       "scenes": [
         {
           "scene_num": 1,
@@ -11654,14 +12390,15 @@ HER BİR KONU İÇİN DÖNÜLECEK KESİN JSON ŞEMASI:
   } else {
     return `You are a senior YouTube content strategist and video script architect.
 The YouTube channel below already has pre-planned topics in its content calendar.
-Generate COMPLETE VIDEO PRODUCTION SCRIPTS (title, description, tags, keywords, style_prompt, and full scene-by-scene narrations and Stable Diffusion image prompts) for each of the following ${items.length} EXISTING topics.
+Generate COMPLETE VIDEO PRODUCTION SCRIPTS (title, description, tags, keywords, style_prompt, bgm_timeline, and full scene-by-scene narrations and Stable Diffusion image prompts) for each of the following ${items.length} EXISTING topics.
 
 CRITICAL RULES:
 1. PRESERVE the exact 'row_id', 'baslik' and 'konu' values from the input list. Do not change them.
 2. Provide exactly ${targetScenes} scenes per topic (total spoken duration ${durationDesc}).
 3. MANDATORY DESCRIPTION & TAGS: The 'description' (150-250 words with tags) and 'tags' (12-15 items) fields are 100% MANDATORY in the JSON output. Never leave them empty or omit them.
-4. Narrations in ${channelLanguage}, and Stable Diffusion prompts in detailed English.
-5. Your output MUST start directly with '[' and end with ']'. Do NOT wrap in an outer object (such as {"materials": [...]}) and do NOT output any conversational text.
+4. ${bgmGuideEn}
+5. Narrations in ${channelLanguage}, and Stable Diffusion prompts in detailed English.
+6. Your output MUST start directly with '[' and end with ']'. Do NOT wrap in an outer object (such as {"materials": [...]}) and do NOT output any conversational text.
 
 Channel Name: ${channelName}
 Category: ${channelCategory}
@@ -11683,6 +12420,10 @@ STRICT JSON SCHEMA FOR EACH TOPIC:
       "tags": ["tag1", "tag2", "tag3"],
       "keywords": ["keyword1", "keyword2"],
       "style_prompt": "Consistent visual style prompt in English (e.g. Cinematic documentary footage, 8k, dramatic lighting)",
+      "bgm_timeline": [
+        { "start_time": "00:00", "end_time": "02:30", "track_id": "lofi_storyteller", "mood": "Calm Narration Intro", "attribution": "No attribution required" },
+        { "start_time": "02:30", "end_time": "06:00", "track_id": "dramatic_suspense", "mood": "Rising Tension & Climax", "attribution": "No attribution required" }
+      ],
       "scenes": [
         {
           "scene_num": 1,

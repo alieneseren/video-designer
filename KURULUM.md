@@ -36,6 +36,7 @@ cd yt-oto-video/files
 - **Python 3.11+**
 - **Node.js 18+** (dashboard build için)
 - **FFmpeg** (`brew install ffmpeg`)
+- **PyTorch + Transformers** (requirements kurulumu ile gelir); ilk video üretiminde CLIP görsel modeli indirilir ve görsel-ses uyum kontrolü için yerelde kullanılır.
 - **LM Studio** (https://lmstudio.ai) — ücretsiz, yerel AI
   - veya Anthropic API (Claude) / Google API (Gemini) desteği de mevcut
 
@@ -128,6 +129,8 @@ Havacılık anlatımında Chatterbox'ın aşırı vurgulu sentez parametresi de 
 - `http://localhost:8000` adresini aç
 - **+ Yeni Kanal** → Dil, konu kategorisi, özel konular gir
 - **▶ Video Üret** butonu ile tek tıkla video oluştur
+- Otomasyon sekmesindeki her sunucu videosunda bulunan **Yeniden Üret** düğmesi yalnızca o videonun saklanan üretim materyalini güncel worker koduyla tekrar kuyruğa alır. Eski çıktı silinmez; yeni çıktı ayrı bir iş olarak oluşur ve otomatik YouTube yüklemesi kapalıdır.
+- Sol menüdeki **Klon Ses Uygula** sekmesinde bir video ve kayıtlı Chatterbox klon sesi seçip **Sesi Uygula**'ya basın. Sistem konuşmayı Whisper zamanlarıyla çözümler, her konuşma parçasını seçilen klonla aynı zaman aralığında yeniden sentezler ve aynı klasöre `*_voice_<klon-id>.mp4` adlı yeni video kaydeder; orijinal video korunur. Gömülü altyazılar çıktı videosunda tutulur; video ile aynı adlı veya klasördeki `subtitles.srt`/`.ass`/`.ssa`/`.vtt` dosyaları çıktı adına göre kopyalanır. Bu işlem mevcut ses kanalını klon sesle değiştirir, müziği/ortam sesini ayırıp korumaz.
 - Ayarlar sayfasından AI modeli ve API anahtarlarını yönet
 - **AI Sohbet → Üretim Asistanı** bölümünde LM Studio'ya doğal dille komut ver (ör. “Reddit hikâyeleri için Gemini API ile 3 video üret”). LM Studio'nun Local Server'ı açık olmalı; seçilen Gemini/Claude sağlayıcısının API anahtarı Ayarlar'da kayıtlı olmalı.
 - Asistan, aktif kanal/kategoriye ait mevcut üretilebilir plan satırlarını kullanır; plan sayısı yetersizse seçilen sağlayıcıyla eksik konuları ekler ve videoları sırayla üretir. Üretim durumu aynı ekranda izlenebilir.
@@ -214,4 +217,9 @@ files/
 | DELETE | `/api/instagram/schedules/{schedule_id}` | Henüz başlamamış Instagram planını iptal et |
 | POST | `/api/assistant/produce` | LM Studio doğal dil komutuyla seri video üretimi başlat |
 | GET | `/api/logs` | Üretim logları |
+| POST | `/api/automation/regenerate-server-video` | Otomasyon'da seçilen tek hazır videoyu kaynak materyalinden güncel kodla yeniden üretim kuyruğuna ekle |
+| POST | `/api/video-voiceover/videos` | MP4/MOV/MKV/WebM/AVI/M4V videoyu seslendirme için yükle |
+| POST | `/api/video-voiceover/jobs` | Videoyu seçilen klon sesle yeniden seslendir |
+| GET | `/api/video-voiceover/jobs/{job_id}` | Seslendirme ilerlemesini ve sonucunu getir |
+| GET | `/api/video-voiceover/jobs/{job_id}/video` | Seslendirilmiş video dosyasını getir |
 | GET | `/docs` | Swagger API dokümantasyonu |

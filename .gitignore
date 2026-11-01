@@ -30,6 +30,9 @@ logs/
 *.db
 *.sqlite
 *.sqlite3
+*.key
+*.pem
+id_*
 *.pt
 *.pth
 *.index
@@ -39,3 +42,9 @@ logs/
 *.wav
 
 remotion/public/media/
+*.bak
+*.bak_*
+*.bak.*
+models/
+*.onnx
+*.bin

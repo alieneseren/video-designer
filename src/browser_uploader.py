@@ -80,7 +80,7 @@ def find_planned_video_folder(channel_id: str, row_id: str, output_base_dir: str
                 try:
                     with open(meta_path, "r", encoding="utf-8") as f:
                         meta_data = json.load(f)
-                        if str(meta_data.get("plan_id", "")) == str(row_id):
+                        if str(meta_data.get("plan_id") or meta_data.get("row_id") or "") == str(row_id):
                             matched = True
                 except Exception:
                     pass
@@ -91,7 +91,7 @@ def find_planned_video_folder(channel_id: str, row_id: str, output_base_dir: str
                 try:
                     with open(vinfo_path, "r", encoding="utf-8") as f:
                         vinfo_data = json.load(f)
-                        if str(vinfo_data.get("plan_id", "")) == str(row_id):
+                        if str(vinfo_data.get("plan_id") or vinfo_data.get("row_id") or "") == str(row_id):
                             matched = True
                 except Exception:
                     pass

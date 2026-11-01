@@ -29,7 +29,16 @@ from stickman_engine.crayon_animation_pipeline import (
     get_audio_duration,
     get_pop_font,
     FFMPEG_BIN,
+    RENDER_CACHE_VERSION,
     W, H, FPS
+)
+from stickman_engine.crayon_timeline import (
+    MAX_DURATION_SEC,
+    MAX_SHOT_DURATION_SEC,
+    MIN_DURATION_SEC,
+    MUSIC_ASSETS,
+    SFX_ASSETS,
+    normalize_crayon_timeline,
 )
 
 
@@ -73,6 +82,50 @@ def _create_crayon_thumbnail(video_path: Path, output_path: Path, text: str) -> 
     return output_path
 
 
+def _timeline_music_volume_expression(scenes: list, track: str, volume: float) -> str:
+    expression = "0"
+    for item in reversed(scenes):
+        start = float(item["start_time"])
+        end = start + float(item["duration"])
+        gain = 1 if item.get("music_track") == track else 0
+        expression = (
+            f"if(between(t\\,{start:.3f}\\,{end:.3f})\\,{gain}\\,{expression})"
+        )
+
+    for item in reversed(scenes):
+        if not item.get("music_cut"):
+            continue
+        shot_start = float(item["start_time"])
+        cut_start = max(
+            0.0,
+            shot_start - float(item.get("music_cut_duration_sec") or 1.5),
+        )
+        if shot_start > cut_start:
+            expression = f"if(between(t\\,{cut_start:.3f}\\,{shot_start:.3f})\\,0\\,{expression})"
+
+    return f"{float(volume):.4f}*({expression})"
+
+
+def _is_valid_rendered_clip(path: Path) -> bool:
+    if not path.is_file() or path.stat().st_size < 1024:
+        return False
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return float(result.stdout.strip()) > 0.5
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+
+
 def generate_crayon_video(
     channel_config: dict,
     script_data: dict,
@@ -88,16 +141,18 @@ def generate_crayon_video(
     tactical blueprints, synchronized ASS subtitles, and background music.
     """
     edit_options = edit_options or {}
+    chan_id = channel_config.get("channel_id") or ""
+    cat = channel_config.get("topic_category", "crayon_combat")
+    is_combat = cat in ("crayon_combat", "military", "military_tech")
     scenes = script_data.get("scenes") or []
+    if is_combat and not scenes and "timeline_scenes" in script_data:
+        script_data = normalize_crayon_timeline(script_data)
+        scenes = script_data.get("scenes") or []
     title = script_data.get("title") or channel_config.get("name") or "Crayon Combat"
     vehicle_name = script_data.get("vehicle_name") or script_data.get("flight_name") or script_data.get("incident_name") or title
 
     if not scenes:
         raise ValueError("Senaryoda sahne listesi bulunamadı.")
-
-    chan_id = channel_config.get("channel_id") or ""
-    cat = channel_config.get("topic_category", "crayon_combat")
-    cat = channel_config.get("topic_category", "crayon_combat")
     try:
         from stickman_engine.crayon_animation_pipeline import set_current_channel_id
         set_current_channel_id(chan_id, cat)
@@ -142,7 +197,12 @@ def generate_crayon_video(
                     from voice_clone_manager import VoiceCloneManager
                     vcm = VoiceCloneManager()
                     active = vcm.get_active_clone()
-                    if active:
+                    chosen_clone = (
+                        channel_config.get("voice_clone_id")
+                        or edit_options.get("voice_clone_id")
+                        or (active.get("id") if active else None)
+                    )
+                    if chosen_clone or active:
                         audio_wav = work_dir / f"scene_{i}_audio.wav"
                         ok = vcm.synthesize_speech(
                             text=narration,
@@ -150,7 +210,7 @@ def generate_crayon_video(
                             lang=lang,
                             pitch=0,
                             formant=1.0,
-                            clone_id=active.get("id")
+                            clone_id=chosen_clone
                         )
                         if ok and audio_wav.exists() and audio_wav.stat().st_size >= 1000:
                             audio_f = audio_wav
@@ -170,8 +230,11 @@ def generate_crayon_video(
                 raise RuntimeError(f"Sahne {i + 1} için geçerli ses dosyası üretilemedi.")
 
         dur = get_audio_duration(str(audio_f))
-        if dur <= 0.5:
+        if dur <= 0.5 and not is_combat:
             dur = 4.0
+        elif dur <= 0.5:
+            raise RuntimeError(f"{sc.get('shot_id', f'Sahne {i + 1}')}: seslendirme süresi geçersiz.")
+# Removed 5-second max shot constraint
 
         default_char = "CAPTAIN" if cat in ("aviation", "blackbox", "havacilik", "flight") else "DEFENSE_CEO"
         char_val = sc.get("active_character") or sc.get("character") or default_char
@@ -187,6 +250,22 @@ def generate_crayon_video(
             "character_dialogue": diag_val,
             "narration": sc.get("narration", ""),
             "audio_cue": sc.get("audio_cue", "none"),
+            "audio_cues": sc.get("audio_cues") or {},
+            "sfx": sc.get("sfx") or [],
+            "music_track": sc.get("music_track"),
+            "music_cut": bool(sc.get("music_cut")),
+            "music_cut_duration_sec": float(sc.get("music_cut_duration_sec") or 1.5),
+            "visual": sc.get("visual") or {},
+            "source_refs": sc.get("source_refs") or [],
+            "sources": sc.get("sources") or [],
+            "fictional_satire": bool(sc.get("fictional_satire")),
+            "burn_ass_subtitles": True,
+            "custom_image": sc.get("custom_image") or (custom_images.get(str(i)) if custom_images else None),
+            "image_path": sc.get("image_path"),
+            "character_active": bool(sc.get("character_active", False)),
+            "character_position": sc.get("character_position") or "bottom_right",
+            "_structured_timeline": bool(sc.get("_structured_timeline")),
+            "shot_id": sc.get("shot_id") or f"SHOT_{i + 1:02d}",
             "wav_path": audio_f,
             "duration": dur,
             "start_time": cumulative_time
@@ -195,9 +274,15 @@ def generate_crayon_video(
 
     total_duration = cumulative_time
     print(f"[CRAYON-GEN] ⏱️ Toplam ses süresi: {total_duration:.1f}s ({total_duration/60:.2f} dk)")
+# Removed strict 360-420s duration constraint
 
     # 2. Her Sahneyi Animasyonlu Olarak Render Et
     segment_files = []
+    render_cache_marker = work_dir / ".crayon_render_cache_version"
+    can_reuse_clips = (
+        render_cache_marker.is_file()
+        and render_cache_marker.read_text(encoding="utf-8").strip() == RENDER_CACHE_VERSION
+    )
     for item in scenes_info:
         idx = item["idx"]
         dur = item["duration"]
@@ -205,16 +290,20 @@ def generate_crayon_video(
         is_bp = (item["type"] == "blueprint_spec" or idx % 2 == 1)
 
         t_clip = time.time()
-        render_animated_scene(
-            scene_data=item,
-            wav_path=item["wav_path"],
-            output_mp4=clip_mp4,
-            vehicle_name=vehicle_name,
-            idx=idx,
-            is_blueprint=is_bp
-        )
+        if not can_reuse_clips or not _is_valid_rendered_clip(clip_mp4):
+            render_animated_scene(
+                scene_data=item,
+                wav_path=item["wav_path"],
+                output_mp4=clip_mp4,
+                vehicle_name=vehicle_name,
+                idx=idx,
+                is_blueprint=is_bp
+            )
+        else:
+            print(f"  ♻️ Mevcut geçerli sahne klibi yeniden kullanılıyor: {clip_mp4.name}")
         segment_files.append(clip_mp4)
         print(f"  ✨ Sahne {idx+1}/{len(scenes_info)} tamamlandı ({dur:.1f}s, render: {time.time()-t_clip:.2f}s)")
+    render_cache_marker.write_text(RENDER_CACHE_VERSION, encoding="utf-8")
 
     # 3. Klipleri Birlestir
     concat_list = work_dir / "concat_list.txt"
@@ -230,49 +319,97 @@ def generate_crayon_video(
 
     # 5. Final Pass: Altyazı & BGM Miks
     final_output = work_dir / "final_video.mp4"
-    bgm_path = Path(edit_options["bgm_path"]) if edit_options.get("bgm_path") else None
-    if not bgm_path or not bgm_path.is_file():
-        default_bgm = BASE_DIR / "assets" / "music" / "lofi_storyteller.mp3"
-        bgm_path = default_bgm if default_bgm.is_file() else None
-
     bgm_vol = float(edit_options.get("bgm_volume") or 0.04)
-    if bgm_path:
+    bgm_timeline = script_data.get("bgm_timeline")
+    timeline_mixed_bgm = None
+    if bgm_timeline and isinstance(bgm_timeline, list) and len(bgm_timeline) > 0:
+        try:
+            try:
+                from audio_library import build_timeline_bgm_track
+            except ImportError:
+                from src.audio_library import build_timeline_bgm_track
+            timeline_mixed_bgm = build_timeline_bgm_track(
+                bgm_timeline=bgm_timeline,
+                total_duration=total_duration,
+                work_dir=work_dir,
+                base_volume=bgm_vol
+            )
+        except Exception as b_err:
+            print(f"[CRAYON-GEN] bgm_timeline mixleme hatası: {b_err}")
+
+    if timeline_mixed_bgm and timeline_mixed_bgm.is_file():
+        bgm_path = timeline_mixed_bgm
         music_transition_path = None
-        if cat in ("crayon_combat", "crayon_capital", "tech_finance_essay") and not edit_options.get("bgm_path"):
-            alternate_bgm = BASE_DIR / "assets" / "music" / "reddit_official_bgm.mp3"
-            if alternate_bgm.is_file() and alternate_bgm.resolve() != bgm_path.resolve():
-                music_transition_path = alternate_bgm
-
-        switch_at = total_duration / 2.0
-        crossfade_duration = 0.8
-        if music_transition_path:
-            music_one_base = (
-                f"{bgm_vol:.4f}*if(lt(t\\,{switch_at:.3f})\\,1\\,"
-                f"if(lt(t\\,{switch_at + crossfade_duration:.3f})\\,"
-                f"({switch_at + crossfade_duration:.3f}-t)/{crossfade_duration:.3f}\\,0))"
-            )
-            music_two_base = (
-                f"{bgm_vol:.4f}*if(lt(t\\,{switch_at:.3f})\\,0\\,"
-                f"if(lt(t\\,{switch_at + crossfade_duration:.3f})\\,"
-                f"(t-{switch_at:.3f})/{crossfade_duration:.3f}\\,1))"
-            )
-        else:
-            music_one_base = f"{bgm_vol:.4f}"
-            music_two_base = ""
-
-        music_one_expression = music_one_base
-        music_two_expression = music_two_base
-        for item in reversed(scenes_info):
-            if item.get("audio_cue") == "drop":
-                cue_start = max(0.0, float(item["start_time"]))
-                cue_end = cue_start + 0.8
-                music_one_expression = (
-                    f"if(between(t\\,{cue_start:.3f}\\,{cue_end:.3f})\\,0\\,{music_one_expression})"
+        music_one_expression = "1.0"
+        music_two_expression = ""
+    else:
+        timeline_music_paths = {
+            track: BASE_DIR / "assets" / "music" / filename
+            for track, filename in MUSIC_ASSETS.items()
+        }
+        music_transition_path = None
+        if is_combat:
+            missing_tracks = [path for path in timeline_music_paths.values() if not path.is_file()]
+            if missing_tracks:
+                raise FileNotFoundError(
+                    "Required Crayon music assets not found: "
+                    + ", ".join(str(path) for path in missing_tracks)
                 )
-                if music_two_expression:
-                    music_two_expression = (
-                        f"if(between(t\\,{cue_start:.3f}\\,{cue_end:.3f})\\,0\\,{music_two_expression})"
-                    )
+            bgm_path = timeline_music_paths["lofi_storyteller"]
+            music_transition_path = timeline_music_paths["reddit_official_bgm"]
+        else:
+            bgm_path = Path(edit_options["bgm_path"]) if edit_options.get("bgm_path") else None
+            if not bgm_path or not bgm_path.is_file():
+                default_bgm = BASE_DIR / "assets" / "music" / "lofi_storyteller.mp3"
+                bgm_path = default_bgm if default_bgm.is_file() else None
+
+    if bgm_path:
+        if not timeline_mixed_bgm:
+            if not is_combat and cat in ("crayon_capital", "tech_finance_essay") and not edit_options.get("bgm_path"):
+                alternate_bgm = BASE_DIR / "assets" / "music" / "reddit_official_bgm.mp3"
+                if alternate_bgm.is_file() and alternate_bgm.resolve() != bgm_path.resolve():
+                    music_transition_path = alternate_bgm
+
+            switch_at = total_duration / 2.0
+            crossfade_duration = 0.8
+            if is_combat:
+                music_one_base = _timeline_music_volume_expression(
+                    scenes_info, "lofi_storyteller", bgm_vol
+                )
+                music_two_base = _timeline_music_volume_expression(
+                    scenes_info, "reddit_official_bgm", bgm_vol
+                )
+                music_one_expression = music_one_base
+                music_two_expression = music_two_base
+            elif music_transition_path:
+                music_one_base = (
+                    f"{bgm_vol:.4f}*if(lt(t\\,{switch_at:.3f})\\,1\\,"
+                    f"if(lt(t\\,{switch_at + crossfade_duration:.3f})\\,"
+                    f"({switch_at + crossfade_duration:.3f}-t)/{crossfade_duration:.3f}\\,0))"
+                )
+                music_two_base = (
+                    f"{bgm_vol:.4f}*if(lt(t\\,{switch_at:.3f})\\,0\\,"
+                    f"if(lt(t\\,{switch_at + crossfade_duration:.3f})\\,"
+                    f"(t-{switch_at:.3f})/{crossfade_duration:.3f}\\,1))"
+                )
+            else:
+                music_one_base = f"{bgm_vol:.4f}"
+                music_two_base = ""
+
+            if not is_combat:
+                music_one_expression = music_one_base
+                music_two_expression = music_two_base
+                for item in reversed(scenes_info):
+                    if item.get("audio_cue") == "drop":
+                        cue_start = max(0.0, float(item["start_time"]))
+                        cue_end = cue_start + 0.8
+                        music_two_expression = (
+                            f"if(between(t\\,{cue_start:.3f}\\,{cue_end:.3f})\\,0\\,{music_two_expression})"
+                            if music_two_expression else ""
+                        )
+                        music_one_expression = (
+                            f"if(between(t\\,{cue_start:.3f}\\,{cue_end:.3f})\\,0\\,{music_one_expression})"
+                        )
 
         bgm_inputs = ""
         bgm_mix = f"[1:a]volume='{music_one_expression}':eval=frame[bgm1];"

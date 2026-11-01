@@ -46,13 +46,20 @@ import {
   Coffee,
   Search,
   CalendarDays,
-  Camera
+  Camera,
+  CheckSquare,
+  BookOpen
 } from "lucide-react";
 import CasperCompanion from "./components/CasperCompanion";
 import CasperTerminalModal from "./components/CasperTerminalModal";
 import AutomationPage from "./components/AutomationPage";
 import VoiceCloneStudio from "./components/VoiceCloneStudio";
+import VideoVoiceClonePage from "./components/VideoVoiceClonePage";
 import VideoScenePatcherModal from "./components/VideoScenePatcherModal";
+import KontrolVideosPage from "./components/KontrolVideosPage";
+import StoryStudio from "./components/StoryStudio";
+import StoryStudioPage from "./components/StoryStudioPage";
+// import VideoEditorPage from "./components/VideoEditorPage"; // Shelved
 
 /* ══════════════════════════════════════════════════════════════════
    CONSTANTS
@@ -88,17 +95,38 @@ const LANGUAGES = [
   { code: "vi", name: "Tiếng Việt", flag: "🇻🇳" },
 ];
 
-const TOPICS = ["music", "crayon_combat", "tech_finance_essay", "aviation", "reddit_stories", "whatsapp_stories", "space", "story", "travel", "planets", "astronomy", "cosmos", "science"];
+const TOPICS = ["basketball_analysis", "aviation", "crayon_combat", "tech_finance_essay", "reddit_stories", "whatsapp_stories", "music", "space", "story", "travel", "planets", "astronomy", "cosmos", "science"];
+
+const CATEGORY_LABELS = {
+  basketball_analysis: "🏀 Basketbol Analizi (The Basketball Show & NBA)",
+  aviation: "✈️ Havacılık (Black Box & ATC)",
+  crayon_combat: "🖍️ Askeri Araçlar & Çöp Adam Hicvi (Crayon Combat)",
+  tech_finance_essay: "📈 Teknoloji & Finans Belgeseli (Crayon Capital)",
+  reddit_stories: "🤖 Reddit Hikayeleri (ASMR + Altyazı)",
+  whatsapp_stories: "💬 WhatsApp Mesajlaşma (Bi' Dublaj & Komedi)",
+  music: "🎵 Biyo-AI Müzik (Sinek Beyni - Connectome)",
+  story: "📖 Hikaye & Masal",
+  travel: "🌍 Seyahat & Gezi",
+  space: "🚀 Uzay & Bilim",
+  planets: "🪐 Gezegenler & Uzay",
+  astronomy: "🔭 Astronomi",
+  cosmos: "✨ Kozmos & Evren",
+  science: "🔬 Bilim",
+};
 
 const NAV = [
   { id: "dashboard", icon: LayoutDashboard,  label: "Dashboard" },
   { id: "automation", icon: Zap,             label: "Otomasyon" },
   { id: "materials", icon: Layers,           label: "Üretim Materyalleri" },
+  { id: "story_studio", icon: BookOpen,      label: "Hikaye & Masal Atölyesi" },
+  { id: "kontrol_videos", icon: CheckSquare, label: "Kontroldeki Videolar" },
   { id: "routines",  icon: Clock,            label: "Rutinler" },
   { id: "server_render", icon: Server,       label: "Sunucu Render" },
   { id: "youtube_upload", icon: Upload,      label: "YouTube Yükle" },
   { id: "instagram_schedule", icon: Camera, label: "Instagram Planla" },
+  { id: "video_voiceover", icon: Volume2, label: "Klon Ses Uygula" },
   { id: "videos",    icon: Film,             label: "Videolar" },
+  // { id: "editor",    icon: Scissors,         label: "Video Düzenleyici" }, // Rafa kaldırıldı
   { id: "shorts_creator", icon: Smartphone,  label: "Uzundan Shorts" },
   { id: "chat",      icon: MessageSquare,    label: "AI Sohbet" },
   { id: "settings",  icon: SettingsIcon,     label: "Ayarlar" },
@@ -357,6 +385,7 @@ function ChannelForm({ initial, onSave, onClose }) {
     enable_hyperframes_hook: false,
     hyperframes_hook_badge: "YENİ VİDEO",
     auto_ai_qa_enabled: false,
+    voice_clone_id: null,
   };
 
 
@@ -365,6 +394,7 @@ function ChannelForm({ initial, onSave, onClose }) {
     language: initial.language, topic_category: initial.topic_category,
     schedule_hour: initial.schedule_hour, active: initial.active,
     shorts_mode: initial.shorts_mode || false,
+    voice_clone_id: initial.voice_clone_id || initial.edit_options?.voice_clone_id || "",
     instagram: initial.instagram || false,
     instagram_username: initial.instagram_username || "",
     transition: initial.transition || "fade",
@@ -374,10 +404,26 @@ function ChannelForm({ initial, onSave, onClose }) {
     channel_id: "", name: "", language: "tr",
     topic_category: "space", schedule_hour: 9,
     active: true, shorts_mode: false, transition: "fade",
+    voice_clone_id: "",
     instagram: false, instagram_username: "",
     auto_ai_qa_enabled: false,
     custom_topics_text: ""
   });
+
+  const [voiceClones, setVoiceClones] = useState([]);
+  const [activeCloneId, setActiveCloneId] = useState("");
+
+  useEffect(() => {
+    fetch("/api/voice-clones")
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.clones) {
+          setVoiceClones(data.clones);
+          setActiveCloneId(data.active_id || "");
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [editOptions, setEditOptions] = useState(() => {
@@ -392,17 +438,20 @@ function ChannelForm({ initial, onSave, onClose }) {
 
   const handleSave = () => {
     if (!valid) return;
+    const effVoiceClone = form.voice_clone_id || null;
     onSave({
       channel_id: form.channel_id, name: form.name,
       language: form.language, topic_category: form.topic_category,
       schedule_hour: form.schedule_hour, active: form.active,
       shorts_mode: form.shorts_mode, transition: form.transition,
+      voice_clone_id: effVoiceClone,
       instagram: form.instagram,
       instagram_username: form.instagram_username.trim().replace(/^@/, ""),
       auto_ai_qa_enabled: !!form.auto_ai_qa_enabled,
       custom_topics: form.custom_topics_text.split(",").map(t => t.trim()).filter(Boolean),
       edit_options: {
         ...editOptions,
+        voice_clone_id: effVoiceClone,
         auto_ai_qa_enabled: !!form.auto_ai_qa_enabled
       }
     });
@@ -423,11 +472,39 @@ function ChannelForm({ initial, onSave, onClose }) {
             onChange={e => set("name", e.target.value)} />
         </div>
       </div>
-      <div className="form-group">
-        <label className="form-label">Yayın Dili</label>
-        <select className="form-input" value={form.language} onChange={e => set("language", e.target.value)}>
-          {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.flag} {l.name}</option>)}
-        </select>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div className="form-group">
+          <label className="form-label">Yayın Dili</label>
+          <select className="form-input" value={form.language} onChange={e => set("language", e.target.value)}>
+            {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.flag} {l.name}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="form-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>🎙️ Ses Klonu Modeli</span>
+            {form.voice_clone_id ? (
+              <span style={{ fontSize: 10, color: "var(--accent-primary)", background: "var(--accent-muted)", padding: "1px 6px", borderRadius: 4 }}>
+                Özel Klon
+              </span>
+            ) : (
+              <span style={{ fontSize: 10, color: "var(--text-muted)" }}>Varsayılan</span>
+            )}
+          </label>
+          <select
+            className="form-input"
+            value={form.voice_clone_id || ""}
+            onChange={e => set("voice_clone_id", e.target.value)}
+          >
+            <option value="">
+              🌐 Sistem Varsayılanı (Aktif Klon{activeCloneId ? `: ${activeCloneId}` : ""})
+            </option>
+            {voiceClones.map(vc => (
+              <option key={vc.id} value={vc.id}>
+                {vc.name} {vc.id === activeCloneId ? "⭐ (Global Aktif)" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <div className="form-group">
@@ -435,15 +512,7 @@ function ChannelForm({ initial, onSave, onClose }) {
           <select className="form-input" value={form.topic_category} onChange={e => set("topic_category", e.target.value)}>
             {TOPICS.map(t => (
               <option key={t} value={t}>
-                {t === "music" ? "Biyo-AI Müzik (Sinek Beyni - Connectome)" :
-                 t === "crayon_combat" ? "Askeri Araçlar & Çöp Adam Hicvi (Crayon Combat)" :
-                 t === "tech_finance_essay" ? "Teknoloji & Finans Belgeseli (Crayon Capital)" :
-                 t === "reddit_stories" ? "Reddit Hikayeleri (ASMR + Altyazı)" :
-                 t === "whatsapp_stories" ? "WhatsApp Mesajlaşma (Bi' Dublaj & Komedi)" :
-                 t === "aviation" ? "Havacılık (Black Box & ATC)" :
-                 t === "story" ? "Hikaye & Masal" :
-                 t === "travel" ? "Seyahat & Gezi" :
-                 t === "space" ? "Uzay & Bilim" : t}
+                {CATEGORY_LABELS[t] || t}
               </option>
             ))}
           </select>
@@ -1119,6 +1188,7 @@ function GroupForm({ initial, channels, onSave, onClose }) {
           onChange={e => handleCategoryChange(e.target.value)}
           disabled={!!initial}
         >
+          <option value="basketball_analysis">Basketbol Analizi (The Basketball Show & NBA)</option>
           <option value="music">Biyo-AI Müzik - Sinek Beyni (music)</option>
           <option value="reddit_stories">Reddit Hikayeleri (reddit_stories)</option>
           <option value="whatsapp_stories">WhatsApp Mesajlaşma (whatsapp_stories)</option>
@@ -2271,6 +2341,7 @@ function ChannelDetail({ channel, onEdit, onDelete, onRun, onReproduce, onStartS
   const [syncingPlan, setSyncingPlan] = useState(false);
   const [uploadingRowId, setUploadingRowId] = useState(null);
   const isMusicChannel = channel?.topic_category === "music" || channel?.topic_category === "connectome" || channel?.topic_category === "muzik" || channel?.topic_category === "sinek_beyni";
+  const isStoryChannel = channel?.topic_category === "story" || channel?.topic_category === "masal" || channel?.channel_id === "ch_story_tr";
 
   const unproducedRows = useMemo(() => {
     return (planData?.plan || []).filter(row => {
@@ -2300,6 +2371,30 @@ function ChannelDetail({ channel, onEdit, onDelete, onRun, onReproduce, onStartS
         }
       }).catch(() => {});
   }, []);
+
+  const [voiceClonesList, setVoiceClonesList] = useState([]);
+  const [activeVoiceCloneId, setActiveVoiceCloneId] = useState("");
+
+  useEffect(() => {
+    fetch("/api/voice-clones")
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.clones) {
+          setVoiceClonesList(data.clones);
+          setActiveVoiceCloneId(data.active_id || "");
+        }
+      }).catch(() => {});
+  }, []);
+
+  const getSelectedCloneName = () => {
+    const cid = channel.voice_clone_id || channel.edit_options?.voice_clone_id;
+    if (!cid) {
+      const activeObj = voiceClonesList.find(c => c.id === activeVoiceCloneId);
+      return activeObj ? `Sistem Varsayılanı (${activeObj.name})` : "Sistem Varsayılanı (Aktif Klon)";
+    }
+    const found = voiceClonesList.find(c => c.id === cid);
+    return found ? found.name : cid;
+  };
   const [planning, setPlanning] = useState(false);
   const [loopCount, setLoopCount] = useState(1);
   const [loopDelay, setLoopDelay] = useState(10);
@@ -2670,25 +2765,38 @@ function ChannelDetail({ channel, onEdit, onDelete, onRun, onReproduce, onStartS
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
             <span style={{ fontSize: 20 }}>{lang?.flag || "🌍"}</span>
             <h2 style={{ fontSize: 18, fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>{channel.name}</h2>
+            <span className="chip chip-accent" style={{ fontSize: 11.5, fontWeight: 600 }}>
+              {CATEGORY_LABELS[channel.topic_category] || `📂 ${channel.topic_category || "Genel"}`}
+            </span>
           </div>
           <code style={{ fontSize: 12, color: "var(--text-muted)", fontFamily: "'JetBrains Mono', monospace" }}>{channel.channel_id}</code>
         </div>
         <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          {isStoryChannel && (
+            <a
+              href="#story-studio-anchor"
+              className="btn btn-primary btn-sm"
+              style={{ display: "inline-flex", alignItems: "center", gap: 5, textDecoration: "none" }}
+            >
+              <BookOpen size={14} /> Hikaye Atölyesine Git
+            </a>
+          )}
           <button className="btn btn-ghost btn-sm" onClick={onEdit}>Düzenle</button>
           <button className="btn btn-danger btn-sm" onClick={onDelete}>Sil</button>
         </div>
       </div>
 
       <div className="card" style={{ padding: 0 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", borderBottom: "1px solid var(--border-subtle)" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", borderBottom: "1px solid var(--border-subtle)" }}>
           {[
+            { label: "Konu Kategorisi", value: CATEGORY_LABELS[channel.topic_category] || channel.topic_category || "Genel" },
             { label: "Dil", value: `${lang?.flag} ${lang?.name || channel.language}` },
-            { label: "Geçiş", value: ({ fade: "🌅 Fade", zoom: "🔍 Zoom", slide: "➡ Slide", parallax: "🌌 Parallax", none: "⬛ Yok" })[channel.transition] || "🌅 Fade" },
             { label: "Zamanlayıcı", value: `${String(channel.schedule_hour).padStart(2, "0")}:00` },
+            { label: "Geçiş", value: ({ fade: "🌅 Fade", zoom: "🔍 Zoom", slide: "➡ Slide", parallax: "🌌 Parallax", none: "⬛ Yok" })[channel.transition] || "🌅 Fade" },
           ].map((item, i) => (
-            <div key={i} style={{ padding: "16px 20px", borderRight: i < 2 ? "1px solid var(--border-subtle)" : "none" }}>
+            <div key={i} style={{ padding: "16px 20px", borderRight: i < 3 ? "1px solid var(--border-subtle)" : "none" }}>
               <div className="stat-label" style={{ marginBottom: 6 }}>{item.label}</div>
-              <div style={{ fontSize: 13.5, fontWeight: 500, color: "var(--text-primary)" }}>{item.value}</div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)" }}>{item.value}</div>
             </div>
           ))}
         </div>
@@ -2725,6 +2833,12 @@ function ChannelDetail({ channel, onEdit, onDelete, onRun, onReproduce, onStartS
         />
       ) : (
         <>
+          {isStoryChannel && (
+            <div id="story-studio-anchor">
+              <StoryStudio channel={channel} />
+            </div>
+          )}
+
           {/* Intro / Outro & Video Süresi Bilgisi */}
       <div className="card" style={{ padding: "14px 16px" }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
@@ -2765,6 +2879,12 @@ function ChannelDetail({ channel, onEdit, onDelete, onRun, onReproduce, onStartS
             <span style={{ color: "var(--text-muted)" }}>NASA Görsel: </span>
             <span style={{ fontWeight: 500, color: "var(--text-secondary)" }}>
               {channel.shorts_mode ? "✓ Sığdır (Bulanık Kenar)" : "Normal"}
+            </span>
+          </div>
+          <div>
+            <span style={{ color: "var(--text-muted)" }}>🎙️ Ses Klonu: </span>
+            <span style={{ fontWeight: 600, color: (channel.voice_clone_id || channel.edit_options?.voice_clone_id) ? "var(--accent-primary)" : "var(--text-secondary)" }}>
+              {getSelectedCloneName()}
             </span>
           </div>
         </div>
@@ -7189,6 +7309,75 @@ function MaterialsPage({ channels, groups = [], selectedChannelId, onSelectChann
     }
   };
 
+  const handleResearchSingle = async (m) => {
+    const matId = m.material_id || m.id;
+    if (!matId) {
+      alert("Hata: Geçersiz materyal tanımlayıcısı.");
+      return;
+    }
+    const itemKey = `${m.channel_id}::${matId}`;
+    setActionLoadingKey(`research::${itemKey}`);
+    setNotification(null);
+    try {
+      const res = await fetch(`/api/materials/${encodeURIComponent(m.channel_id)}/${encodeURIComponent(matId)}/research?force=true`, {
+        method: "POST"
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setNotification({
+          type: "success",
+          message: `🔍 "${m.title || matId}" için medya araştırması tamamlandı! (${data.verified_media_count}/${data.total_scenes} sahne doğrulandı)`
+        });
+        fetchMaterials();
+      } else {
+        setNotification({
+          type: "error",
+          message: data.detail || data.error || "Araştırma başlatılamadı."
+        });
+      }
+    } catch (err) {
+      setNotification({ type: "error", message: `Hata: ${err.message}` });
+    } finally {
+      setActionLoadingKey(null);
+    }
+  };
+
+  const handleBatchResearch = async () => {
+    const chId = activeChannelId || "blackboxaudioo";
+    const chObj = channels.find(c => c.channel_id === chId);
+    const chName = chObj?.name || chId;
+
+    const ok = window.confirm(
+      `"${chName}" kanalındaki tüm üretilmemiş materyaller için tarihi arşiv (Wikimedia), 1080p B-roll ve telemetri grafikleri taranıp doğrulanacaktır.\n\nİşlemi başlatmak istiyor musunuz?`
+    );
+    if (!ok) return;
+
+    setActionLoadingKey("batch_research");
+    setNotification(null);
+    try {
+      const res = await fetch(`/api/materials/${encodeURIComponent(chId)}/research-all?force=false`, {
+        method: "POST"
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setNotification({
+          type: "success",
+          message: `🔍 Toplu araştırma tamamlandı! ${data.processed_count} materyal başarıyla işlendi.`
+        });
+        fetchMaterials();
+      } else {
+        setNotification({
+          type: "error",
+          message: data.detail || data.error || "Toplu araştırma başarısız oldu."
+        });
+      }
+    } catch (err) {
+      setNotification({ type: "error", message: `Hata: ${err.message}` });
+    } finally {
+      setActionLoadingKey(null);
+    }
+  };
+
   const handleBatchProduce = async (selectedOnly = true) => {
     let targets = [];
     if (selectedOnly) {
@@ -7606,6 +7795,33 @@ function MaterialsPage({ channels, groups = [], selectedChannelId, onSelectChann
             >
               <Play size={12} fill="currentColor" /> Tüm Hazırları Üret ({readyCount})
             </button>
+
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={handleBatchResearch}
+              disabled={loading || actionLoadingKey === "batch_research"}
+              style={{
+                padding: "6px 12px",
+                fontSize: 12,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                border: "1px solid rgba(14,165,233,0.3)",
+                color: "#38bdf8"
+              }}
+              title="Bu kanaldaki tüm üretilmemiş materyalleri otomatik araştırıp görsellerini doğrular"
+            >
+              {actionLoadingKey === "batch_research" ? (
+                <>
+                  <Loader2 size={12} className="animate-spin" /> Araştırılıyor...
+                </>
+              ) : (
+                <>
+                  <Search size={12} /> Tümünü Araştır
+                </>
+              )}
+            </button>
           </div>
         </div>
       </div>
@@ -7713,6 +7929,16 @@ function MaterialsPage({ channels, groups = [], selectedChannelId, onSelectChann
                           </span>
                         )}
 
+                        {m.researched ? (
+                          <span className="chip" style={{ fontSize: 10, padding: "2px 6px", background: "rgba(16, 185, 129, 0.15)", color: "#34d399", border: "1px solid rgba(16, 185, 129, 0.35)", display: "inline-flex", alignItems: "center", gap: 3 }} title={`Medya doğrulaması tamamlandı (${m.media_coverage || "100%"})`}>
+                            <CheckCircle2 size={10} /> 🔍 Araştırıldı ({m.media_coverage || "100%"})
+                          </span>
+                        ) : (
+                          <span className="chip" style={{ fontSize: 10, padding: "2px 6px", background: "rgba(14, 165, 233, 0.12)", color: "#38bdf8", border: "1px solid rgba(14, 165, 233, 0.25)", display: "inline-flex", alignItems: "center", gap: 3 }} title="Medya araştırması bekliyor. Yanındaki 'Araştır' butonuyla başlatabilirsiniz.">
+                            <Search size={10} /> Araştırma Bekliyor
+                          </span>
+                        )}
+
                         <span style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "monospace" }}>
                           {matId}
                         </span>
@@ -7737,6 +7963,36 @@ function MaterialsPage({ channels, groups = [], selectedChannelId, onSelectChann
 
                   {/* Sağ Taraf: Aksiyon Butonları */}
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", flexShrink: 0 }}>
+                    <button
+                      className="btn btn-sm"
+                      onClick={() => handleResearchSingle(m)}
+                      disabled={actionLoadingKey === `research::${itemKey}` || hasEmptyScenes}
+                      style={{
+                        padding: "5px 10px",
+                        fontSize: 11.5,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        background: m.researched
+                          ? "rgba(14, 165, 233, 0.15)"
+                          : "linear-gradient(135deg, #0ea5e9, #0284c7)",
+                        border: m.researched ? "1px solid rgba(14, 165, 233, 0.4)" : "none",
+                        color: m.researched ? "#38bdf8" : "#fff",
+                        cursor: hasEmptyScenes ? "not-allowed" : "pointer"
+                      }}
+                      title="Tarihi NTSB fotoğrafları, 1080p B-roll ve telemetri grafikleri araştırıp doğrular"
+                    >
+                      {actionLoadingKey === `research::${itemKey}` ? (
+                        <>
+                          <Loader2 size={12} className="animate-spin" /> Araştırılıyor...
+                        </>
+                      ) : (
+                        <>
+                          <Search size={11} /> {m.researched ? "Yeniden Araştır" : "Araştır"}
+                        </>
+                      )}
+                    </button>
+
                     <button
                       className="btn btn-primary btn-sm"
                       onClick={() => handleProduceSingle(m, false)}
@@ -7983,6 +8239,13 @@ function MaterialsPage({ channels, groups = [], selectedChannelId, onSelectChann
                 🎬 Sahneler ({inspectMaterial.scenes?.length || 0})
               </button>
               <button
+                className={`btn btn-sm ${inspectTab === "media" ? "btn-primary" : "btn-ghost"}`}
+                onClick={() => setInspectTab("media")}
+                style={{ fontSize: 12 }}
+              >
+                🔍 Doğrulanmış Medya ({Object.keys(inspectMaterial.scene_media || inspectMaterial.images || {}).length})
+              </button>
+              <button
                 className={`btn btn-sm ${inspectTab === "metadata" ? "btn-primary" : "btn-ghost"}`}
                 onClick={() => setInspectTab("metadata")}
                 style={{ fontSize: 12 }}
@@ -8020,6 +8283,59 @@ function MaterialsPage({ channels, groups = [], selectedChannelId, onSelectChann
                     )}
                   </div>
                 ))}
+                </div>
+              );
+            })()}
+
+            {inspectTab === "media" && (() => {
+              const sceneMedia = inspectMaterial.scene_media || {};
+              const images = inspectMaterial.images || {};
+              const keys = Array.from(new Set([...Object.keys(sceneMedia), ...Object.keys(images)])).sort((a,b) => Number(a) - Number(b));
+              if (keys.length === 0) {
+                return (
+                  <div style={{ padding: 30, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>
+                    Henüz araştırma yapılmamış. "Araştır" butonuna tıklayarak Wikimedia, Pixabay ve telemetri arşivlerinden medyaları otomatik bulup doğrulayabilirsiniz.
+                  </div>
+                );
+              }
+              return (
+                <div style={{ maxHeight: 420, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10, paddingRight: 4 }}>
+                  {keys.map((k) => {
+                    const sm = sceneMedia[k] || {};
+                    const imgPath = images[k] || sm.path || "";
+                    const isVid = sm.type === "video" || imgPath.endsWith(".mp4");
+                    const fileName = imgPath ? imgPath.split("/").pop() : "";
+                    return (
+                      <div key={k} style={{ padding: 12, borderRadius: 6, background: "var(--bg-secondary)", border: "1px solid var(--border-subtle)" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: "#22d3ee" }}>
+                            Sahne {Number(k) + 1} {isVid ? "🎬 Video Klip" : "📷 Görsel"}
+                          </span>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <span className="chip" style={{ fontSize: 10, padding: "2px 6px", background: "rgba(14,165,233,0.15)", color: "#38bdf8" }}>
+                              {sm.source || "Yerel/Harici"}
+                            </span>
+                            {sm.score && (
+                              <span className="chip chip-success" style={{ fontSize: 10, padding: "2px 6px" }}>
+                                Skor: %{sm.score}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", marginBottom: 4 }}>
+                          {sm.title || fileName}
+                        </div>
+                        {sm.reason && (
+                          <div style={{ fontSize: 11.5, color: "var(--text-secondary)", marginBottom: 6 }}>
+                            💡 {sm.reason}
+                          </div>
+                        )}
+                        <div style={{ fontSize: 10.5, fontFamily: "monospace", color: "var(--text-muted)", wordBreak: "break-all" }}>
+                          📁 {imgPath}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })()}
@@ -8101,6 +8417,28 @@ function MaterialsPage({ channels, groups = [], selectedChannelId, onSelectChann
                   const isTargetEmpty = targetSc === 0;
                   return (
                     <>
+                      <button
+                        className="btn btn-sm"
+                        disabled={isTargetEmpty || actionLoadingKey === `research::${inspectMaterial.channel_id}::${inspectMaterial.material_id || inspectMaterial.id}`}
+                        onClick={() => {
+                          const target = inspectMaterial;
+                          handleResearchSingle(target);
+                        }}
+                        style={{
+                          background: inspectMaterial.researched
+                            ? "rgba(14, 165, 233, 0.15)"
+                            : "linear-gradient(135deg, #0ea5e9, #0284c7)",
+                          border: inspectMaterial.researched ? "1px solid rgba(14, 165, 233, 0.4)" : "none",
+                          color: inspectMaterial.researched ? "#38bdf8" : "#fff",
+                          cursor: isTargetEmpty ? "not-allowed" : "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4
+                        }}
+                        title="Tarihi NTSB fotoğrafları, 1080p B-roll ve telemetri grafikleri araştırıp doğrular"
+                      >
+                        <Search size={12} /> {inspectMaterial.researched ? "Yeniden Araştır" : "Araştır"}
+                      </button>
                       <button
                         className="btn btn-primary btn-sm"
                         disabled={isTargetEmpty}
@@ -8561,7 +8899,11 @@ function DashboardPage({
                           </span>
                         )}
                       </div>
-                      <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "monospace" }}>{ch.channel_id}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontFamily: "monospace" }}>{ch.channel_id}</span>
+                        <span>•</span>
+                        <span style={{ color: "var(--accent-primary)", opacity: 0.85, fontSize: 10.5 }}>{CATEGORY_LABELS[ch.topic_category] || ch.topic_category}</span>
+                      </div>
                     </div>
                     <div style={{ display: "flex", gap: 6, marginRight: 8 }} onClick={e => e.stopPropagation()}>
                       <span style={{ fontSize: 13, cursor: "default", opacity: 1 }} title="YouTube Aktif">🔴</span>
@@ -9001,9 +9343,12 @@ export default function App() {
                 {activePage === "dashboard" ? "Dashboard" : 
                  activePage === "automation" ? "Otomasyon & Bulut Kuyruk Merkezi" :
                  activePage === "materials" ? "Üretim Materyalleri Merkezi" :
+                 activePage === "story_studio" ? "Hikaye & Masal Atölyesi" :
+                 activePage === "kontrol_videos" ? "Kontroldeki Videolar" :
                  activePage === "server_render" ? "Bulut Sunucu Video Üretim Merkezi" :
                  activePage === "youtube_upload" ? "YouTube Yükleme Merkezi" :
                  activePage === "instagram_schedule" ? "Instagram Planlama" :
+                 activePage === "video_voiceover" ? "Videoyu Klon Sesle Seslendir" :
                  activePage === "videos" ? "Videolar" : 
                  activePage === "shorts_creator" ? "Uzundan Shorts Türet" : 
                  activePage === "chat" ? "AI Sohbet" : 
@@ -9016,12 +9361,18 @@ export default function App() {
                   ? "Seçilen planları tek tıkla Oracle Cloud sunucusuna aktarın, Mac'inizi kapatın. Videolar sunucuda sırayla derlenir ve saklanır."
                   : activePage === "materials"
                   ? "Gemini tarafından oluşturulan video senaryoları, görsel istemleri ve tekli/kuyruk üretim yönetimi"
+                  : activePage === "story_studio"
+                  ? "Kullanıcı hikaye taslakları, Gemini ile senaryolaştırma ve partlara bölünmüş sinematik kod animasyonları"
+                  : activePage === "kontrol_videos"
+                  ? "Kanalların kontrol klasöründeki videoları inceleyin, önizleyin ve onaylayarak yüklenecek klasörüne aktarın."
                   : activePage === "server_render"
                   ? "Oracle Cloud aarch64 sunucusunda derlenen videolar ve yerel klasöre indirme"
                   : activePage === "youtube_upload"
                   ? "YouTube Data API doğrudan yükleyici ve ertesi güne akıllı zamanlama"
                   : activePage === "instagram_schedule"
                   ? "Instagram Reels içeriklerini seçtiğiniz tarihe planlayın"
+                  : activePage === "video_voiceover"
+                  ? "Bir video ve kayıtlı klon ses seçerek konuşmayı klon sesle yeniden üretin"
                   : activePage === "videos"
                   ? "Üretilen videoların listesi ve yönetimi"
                   : activePage === "shorts_creator"
@@ -9092,6 +9443,18 @@ export default function App() {
                    onTriggerTask={setRunningTask}
                  />
                ) :
+               activePage === "story_studio" ? (
+                 <StoryStudioPage
+                   channels={channels}
+                   selectedChannelId={selectedChannelId}
+                   onSelectChannel={setSelectedChannelId}
+                 />
+               ) :
+               activePage === "kontrol_videos" ? (
+                 <KontrolVideosPage
+                   onNavigateUpload={() => setActivePage("youtube_upload")}
+                 />
+               ) :
                activePage === "server_render" ? (
                  <ServerRenderPage
                    channels={channels}
@@ -9108,6 +9471,7 @@ export default function App() {
                activePage === "instagram_schedule" ? (
                  <InstagramSchedulePage channels={channels} selectedChannelId={selectedChannelId} />
                ) :
+               activePage === "video_voiceover" ? <VideoVoiceClonePage /> :
                activePage === "videos"   ? <VideosPage /> :
                activePage === "shorts_creator" ? <ShortsCreatorPage selectedChannelId={selectedChannelId} channels={channels} onStartShorts={handleStartShorts} /> :
                activePage === "chat"     ? <ChatPage selectedChannelId={selectedChannelId} channels={channels} /> :

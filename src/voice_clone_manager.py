@@ -574,8 +574,29 @@ class VoiceCloneManager:
         pth = clone.get("rvc_pth_path")
         idx = clone.get("rvc_index_path")
         if not (pth and idx and os.path.exists(pth) and os.path.exists(idx)):
-            logger.info(f"[VoiceCloneManager] Seçili ses profilinde RVC modeli tanımlı değil ({clone.get('name')}). Orijinal ses korunuyor.")
-            return {"success": False, "reason": "no_rvc_model", "video_path": str(v_path), "clone_name": clone.get("name")}
+            # Akıllı Model Eşleştirme & Aktif Klon Fallback
+            fallback_clone = None
+            for cand in reg.get("clones", []):
+                if cand.get("rvc_pth_path") and os.path.exists(cand["rvc_pth_path"]) and (
+                    clone.get("id") in cand.get("id", "") or clone.get("name", "") in cand.get("name", "")
+                ):
+                    fallback_clone = cand
+                    break
+            if not fallback_clone:
+                active_id = reg.get("active_id")
+                active_c = next((c for c in reg.get("clones", []) if c.get("id") == active_id), None)
+                if active_c and active_c.get("rvc_pth_path") and os.path.exists(active_c["rvc_pth_path"]):
+                    fallback_clone = active_c
+
+            if fallback_clone:
+                logger.info(f"[VoiceCloneManager] '{clone.get('name')}' doğrudan RVC içermiyor, ilişkili/aktif RVC modeline ('{fallback_clone.get('name')}') devrediliyor.")
+                clone = fallback_clone
+                pth = clone.get("rvc_pth_path")
+                idx = clone.get("rvc_index_path")
+                target_id = clone.get("id")
+            else:
+                logger.info(f"[VoiceCloneManager] Seçili ses profilinde RVC modeli tanımlı değil ({clone.get('name')}). Orijinal ses korunuyor.")
+                return {"success": False, "reason": "no_rvc_model", "video_path": str(v_path), "clone_name": clone.get("name")}
 
         ts = int(time.time() * 1000) % 1000000
         TEMP_DIR.mkdir(parents=True, exist_ok=True)
@@ -638,6 +659,20 @@ class VoiceCloneManager:
             # Fon müziğini vokal frekanslarını baskılamayacak seviyeye (0.05 - 0.06 / -25dB) çek
             effective_bgm_vol = min(float(bgm_volume), 0.06) if float(bgm_volume) > 0.06 else float(bgm_volume)
 
+            # Kaynak videonun tam süresini oku (Kırpılma / -shortest hatasını önlemek için)
+            v_dur = 0.0
+            try:
+                p_run = subprocess.run([
+                    "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1", str(v_path)
+                ], capture_output=True, text=True, check=True)
+                v_dur = float(p_run.stdout.strip())
+            except Exception:
+                v_dur = 0.0
+
+            dur_flags = ["-t", f"{v_dur:.3f}"] if v_dur > 0 else ["-shortest"]
+            apad_filter = f",apad=whole_dur={v_dur:.3f}" if v_dur > 0 else ",apad"
+
             if resolved_bgm:
                 logger.info(f"[VoiceCloneManager] 🎵 Fon müziği temiz ve dengeli miksleniyor ({resolved_bgm.name}, vol={effective_bgm_vol})...")
                 cmd_remux = [
@@ -646,7 +681,7 @@ class VoiceCloneManager:
                     "-i", str(cloned_audio),
                     "-stream_loop", "-1", "-i", str(resolved_bgm),
                     "-filter_complex", (
-                        f"[1:a]loudnorm=I=-14:TP=-1.5:LRA=11[vocal_norm];"
+                        f"[1:a]loudnorm=I=-14:TP=-1.5:LRA=11{apad_filter}[vocal_norm];"
                         f"[2:a]volume={effective_bgm_vol}[bgm];"
                         f"[vocal_norm][bgm]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[aout]"
                     ),
@@ -654,24 +689,20 @@ class VoiceCloneManager:
                     "-map", "0:v:0",
                     "-map", "[aout]",
                     "-c:a", "aac",
-                    "-b:a", "192k",
-                    "-shortest",
-                    str(temp_video_out)
-                ]
+                    "-b:a", "192k"
+                ] + dur_flags + [str(temp_video_out)]
             else:
                 cmd_remux = [
                     "ffmpeg", "-y",
                     "-i", str(v_path),
                     "-i", str(cloned_audio),
-                    "-filter_complex", "[1:a]loudnorm=I=-14:TP=-1.5:LRA=11[aout]",
+                    "-filter_complex", f"[1:a]loudnorm=I=-14:TP=-1.5:LRA=11{apad_filter}[aout]",
                     "-c:v", "copy",
                     "-map", "0:v:0",
                     "-map", "[aout]",
                     "-c:a", "aac",
-                    "-b:a", "192k",
-                    "-shortest",
-                    str(temp_video_out)
-                ]
+                    "-b:a", "192k"
+                ] + dur_flags + [str(temp_video_out)]
             subprocess.run(cmd_remux, capture_output=True, check=True, timeout=120)
 
             if not temp_video_out.exists() or temp_video_out.stat().st_size < 10000:

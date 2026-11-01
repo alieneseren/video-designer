@@ -459,12 +459,18 @@ def _clip_kenburns(
     W: int = 1920,
     H: int = 1080,
 ) -> VideoClip:
-    """Subtle Ken Burns: aynı görsel içinde yavaş zoom (caption değişimleri için ideal)."""
+    """Subtle Ken Burns: aynı görsel içinde yavaş zoom. Shorts dikey modunda izleyici retention'ı için 3.0s aralıklarla jump-cut punch-in (%100 -> %125) ekler."""
     pil_img = Image.fromarray(frame)
+    is_shorts = (W < H)
 
     def make_frame(t):
-        # 0 → intensity zoom
-        scale = 1.0 + intensity * (t / max(duration, 0.001))
+        if is_shorts and duration >= 3.2:
+            block_idx = int(t // 3.0)
+            t_in_block = t % 3.0
+            base_zoom = 1.25 if (block_idx % 2 == 1) else 1.00
+            scale = base_zoom + intensity * (t_in_block / 3.0)
+        else:
+            scale = 1.0 + intensity * (t / max(duration, 0.001))
         new_w = max(W, int(W * scale))
         new_h = max(H, int(H * scale))
         resized = pil_img.resize((new_w, new_h), Image.BILINEAR)
@@ -1134,6 +1140,22 @@ class SubtitleBurner:
 
             if same_file:
                 shutil.move(tmp_output, output_path)
+
+            # Evrensel Transparan Sosyal CTA (Abone Ol + Beğen + Bildirim) Katmanı
+            try:
+                from social_cta_overlay import apply_social_cta_overlay
+            except ImportError:
+                try:
+                    from src.social_cta_overlay import apply_social_cta_overlay
+                except ImportError:
+                    apply_social_cta_overlay = None
+
+            if apply_social_cta_overlay:
+                cta_lang = getattr(self.config, "language", "en") or "en"
+                try:
+                    apply_social_cta_overlay(output_path, output_path, language=cta_lang)
+                except Exception as e_cta:
+                    print(f"[BURN] ⚠️ Social CTA overlay uyarısı: {e_cta}")
 
             print(f"[BURN] Final video yazıldı → {output_path}")
             return True

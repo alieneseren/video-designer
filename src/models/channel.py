@@ -16,6 +16,7 @@ class ChannelSchema(BaseModel):
     shorts_mode: bool = False
     transition: str = "fade"   # fade | zoom | slide | none | kenburns | parallax
     edit_options: Optional[dict] = None
+    voice_clone_id: Optional[str] = None
     instagram: Optional[bool] = None
     instagram_username: Optional[str] = None
     instagram_user_id: Optional[str] = None

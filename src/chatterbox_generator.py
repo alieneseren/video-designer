@@ -60,7 +60,8 @@ class ChatterboxAudioGenerator:
         audio_prompt_path: str = None,
         exaggeration: float = 0.5,
         scenes: list = None,
-        character_name: str = None
+        character_name: str = None,
+        require_audio_prompt: bool = False,
     ) -> tuple[bool, list[dict]]:
         """
         Yerel Chatterbox modelini kullanarak ses üretir ve kaydeder.
@@ -194,13 +195,16 @@ class ChatterboxAudioGenerator:
                 cleaned = re.sub(r'\?\!|\!\?', '?', cleaned)
                 # Markdown, tırnak, parantez ve çizgi karakterlerini temizle
                 cleaned = re.sub(r'[\*#_~`"“”‘’«»\'\[\]\(\)\{\}\<\>\\]', '', cleaned)
-                # Tire veya em-dash'leri virgülle değiştir
-                cleaned = re.sub(r'\s*[\—\-–]\s*', ', ', cleaned)
+                # Kelime arasındaki kısa çizgileri boşluğa çevir (Örn: forty-eight -> forty eight, triple-doubles -> triple doubles)
+                cleaned = re.sub(r'(\b\w+)\s*[-]\s*(\w+\b)', r'\1 \2', cleaned)
+                # Cümleler arası uzun tire veya em-dash'leri virgüle çevir
+                cleaned = re.sub(r'\s*[\—–]\s*', ', ', cleaned)
+                cleaned = re.sub(r'\s+[-]\s+', ', ', cleaned)
                 # Fazla boşlukları düzelt
                 cleaned = re.sub(r'\s+', ' ', cleaned).strip()
                 return cleaned
 
-            def split_into_tts_chunks(raw_text: str, max_words: int = 13) -> list[str]:
+            def split_into_tts_chunks(raw_text: str, max_words: int = 16) -> list[str]:
                 text_clean = clean_tts_text(raw_text)
                 if not text_clean:
                     return []
@@ -239,7 +243,7 @@ class ChatterboxAudioGenerator:
                             
                             # Eğer tek bir yan cümle bile max_words'ten büyükse bağlaçlardan böl
                             if len(sc_words) > max_words:
-                                conj_pattern = r'\b(ve|ama|fakat|çünkü|ancak|oysa|halbuki|lakin|ki)\b'
+                                conj_pattern = r'\b(and|but|that|which|because|while|although|to|ve|ama|fakat|çünkü|ancak|oysa|halbuki|lakin|ki)\b'
                                 parts = re.split(conj_pattern, sc, flags=re.IGNORECASE)
                                 sub_buf = []
                                 sub_wc = 0
@@ -335,6 +339,8 @@ class ChatterboxAudioGenerator:
                     )
                     wav_np = wav.squeeze(0).cpu().numpy()
                 except Exception as gen_err:
+                    if require_audio_prompt and audio_prompt_path:
+                        raise RuntimeError("Seçilen klon ses sentez sırasında uygulanamadı.") from gen_err
                     print(f"[CHATTERBOX] Segment üretim hatası: {gen_err}, güvenli fallback deneniyor...")
                     wav = model.generate(
                         text=seg_text,
@@ -450,4 +456,6 @@ class ChatterboxAudioGenerator:
             print(f"[CHATTERBOX] Hata: {e}")
             import traceback
             traceback.print_exc()
+            if require_audio_prompt and audio_prompt_path:
+                raise RuntimeError("Seçilen klon sesle sentez başarısız oldu.") from e
             return False, []

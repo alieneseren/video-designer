@@ -41,6 +41,7 @@ def test_remote_completed_video_updates_material_status():
     ]
     remote_runner.get_queue_status.return_value = {}
     planner = MagicMock()
+    planner.get_plan.return_value = [{"id": "4", "uretildi": "Hayır"}]
 
     with patch("remote_runner.RemoteRunner", return_value=remote_runner), patch(
         "browser_uploader.find_planned_video_folder", return_value=None
@@ -118,9 +119,53 @@ def test_find_planned_video_supports_final_video_filename():
         assert found["video_path"] == str(video_dir / "final_video.mp4")
 
 
+def test_completed_material_reconciles_unmarked_plan_without_remote_lookup():
+    manager = FakeMaterialsManager(tempfile.gettempdir())
+    material = {
+        "id": "mat_already_done",
+        "material_id": "mat_already_done",
+        "channel_id": "tacticallcrayon",
+        "row_id": "4",
+        "status": "downloaded",
+    }
+    planner = MagicMock()
+    planner.get_plan.return_value = [{"id": "4", "uretildi": "Hayır"}]
+
+    with patch("content_planner.ContentPlanner", return_value=planner):
+        material_status_sync.sync_materials_with_generated_videos(manager, [material])
+
+    planner.mark_as_produced.assert_called_once_with("4")
+    assert manager.updated == []
+
+
+def test_find_planned_video_matches_row_id_from_local_metadata():
+    from browser_uploader import find_planned_video_folder
+
+    with tempfile.TemporaryDirectory(prefix="produced-video-row-id-") as temp:
+        output = Path(temp)
+        video_dir = output / "tacticallcrayon" / "yuklenecek" / "bu"
+        video_dir.mkdir(parents=True)
+        (video_dir / "final.mp4").write_bytes(b"video")
+        (video_dir / "metadata.json").write_text(
+            '{"row_id": "4"}',
+            encoding="utf-8",
+        )
+
+        found = find_planned_video_folder(
+            "tacticallcrayon",
+            "4",
+            output_base_dir=str(output),
+        )
+
+        assert found is not None
+        assert found["video_path"] == str(video_dir / "final.mp4")
+
+
 if __name__ == "__main__":
     test_remote_completed_video_updates_material_status()
     test_cloud_queue_job_without_final_video_remains_queued()
     test_active_cloud_job_is_not_marked_produced_from_an_older_local_video()
     test_find_planned_video_supports_final_video_filename()
+    test_completed_material_reconciles_unmarked_plan_without_remote_lookup()
+    test_find_planned_video_matches_row_id_from_local_metadata()
     print("MATERIAL PRODUCTION STATUS TESTS PASSED")

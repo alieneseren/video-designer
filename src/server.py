@@ -216,6 +216,7 @@ from routers import (
     browser_router,
     outputs_router,
     video_patch_router,
+    procedural_video_router,
 )
 
 app.include_router(settings_router)
@@ -224,6 +225,8 @@ app.include_router(media_router)
 app.include_router(browser_router)
 app.include_router(outputs_router)
 app.include_router(video_patch_router)
+app.include_router(procedural_video_router)
+
 
 
 
@@ -372,8 +375,12 @@ def get_voice_clones():
     from voice_clone_manager import VoiceCloneManager
     mgr = VoiceCloneManager()
     active_clone = mgr.get_active_clone()
+    clones = mgr.list_clones()
+    for clone in clones:
+        prompts = [clone.get("voice_pt_path"), clone.get("voice_wav_path")]
+        clone["voice_prompt_available"] = any(prompt and Path(prompt).is_file() for prompt in prompts)
     return {
-        "clones": mgr.list_clones(),
+        "clones": clones,
         "active_id": active_clone.get("id") if active_clone else "",
         "device": mgr.get_device()
     }
@@ -2639,10 +2646,20 @@ def archive_video(folder_name: str):
             shutil.rmtree(dest_folder)
             
         folder.rename(dest_folder)
+        try:
+            from retention_manager import tag_archived_folder
+            tag_archived_folder(dest_folder, retention_days=20)
+        except Exception:
+            pass
         new_folder_name = f"{channel_id}/yuklenen/{folder_basename}"
         return {"success": True, "folder": new_folder_name, "archived": True}
     else:
         (folder / ".archived").touch()
+        try:
+            from retention_manager import tag_archived_folder
+            tag_archived_folder(folder, retention_days=20)
+        except Exception:
+            pass
         return {"success": True, "folder": folder_name, "archived": True}
 
 
@@ -2778,6 +2795,11 @@ def update_upload_status(folder_name: str, payload: dict):
             
         try:
             parent_folder.rename(dest_folder)
+            try:
+                from retention_manager import tag_archived_folder
+                tag_archived_folder(dest_folder, retention_days=20)
+            except Exception:
+                pass
             print(f"[STATUS] Incident group archived successfully: {parent_folder.name}")
             
             # folder_name'i yeni konuma göre güncelle
@@ -4549,6 +4571,45 @@ def delete_single_material(channel_id: str, material_id: str):
     return {"success": True, "message": "Materyal başarıyla silindi."}
 
 
+@app.post("/api/materials/{channel_id}/{material_id}/research")
+def research_single_material_endpoint(
+    channel_id: str,
+    material_id: str,
+    force: bool = Query(False)
+):
+    """
+    Belirli bir materyal için Akıllı Araştırma Motorunu çalıştırır.
+    Tarihi arşivleri (Wikimedia), 1080p B-roll (Pixabay) ve telemetri infografiklerini
+    araştırır, sahnelerle doğrular ve material.json'ı günceller.
+    """
+    from aviation_research_engine import AviationResearchEngine
+    engine = AviationResearchEngine()
+    result = engine.research_material(channel_id=channel_id, material_id=material_id, force=force)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Araştırma başarısız oldu."))
+    return result
+
+
+@app.post("/api/materials/{channel_id}/research-all")
+def research_all_materials_endpoint(
+    channel_id: str,
+    force: bool = Query(False),
+    limit: Optional[int] = Query(None)
+):
+    """
+    Kanalın bekleyen tüm üretilmemiş materyalleri için toplu araştırma motorunu çalıştırır.
+    """
+    from aviation_research_engine import AviationResearchEngine
+    engine = AviationResearchEngine()
+    results = engine.research_all_unproduced(channel_id=channel_id, force=force, max_count=limit)
+    return {
+        "success": True,
+        "channel_id": channel_id,
+        "processed_count": len(results),
+        "results": results
+    }
+
+
 @app.post("/api/groups/{group_id}/plan-and-materials")
 def import_group_plan_and_materials(group_id: str, payload: PlanAndMaterialsPayload):
     """
@@ -4896,6 +4957,10 @@ class AutomationDeleteServerPayload(BaseModel):
     channel_id: str
     job_id: str
 
+class AutomationRegenerateServerPayload(BaseModel):
+    channel_id: str
+    job_id: str
+
 
 @app.get("/api/automation/unproduced-plans")
 def get_automation_unproduced_plans():
@@ -5063,6 +5128,28 @@ def delete_automation_server_video(payload: AutomationDeleteServerPayload):
         raise HTTPException(status_code=500, detail=f"Sunucudan silme hatası: {str(e)}")
 
 
+@app.post("/api/automation/regenerate-server-video")
+def regenerate_automation_server_video(payload: AutomationRegenerateServerPayload):
+    """Sunucuda hazır olan tek bir videoyu güncel worker koduyla yeniden kuyruğa alır."""
+    try:
+        from src.remote_runner import RemoteRunner
+        runner = RemoteRunner()
+        if not runner.is_reachable():
+            raise HTTPException(status_code=503, detail="Oracle Cloud sunucusuna erişilemiyor.")
+        result = runner.regenerate_server_video(payload.channel_id, payload.job_id)
+        return {"success": True, **result}
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    except RuntimeError as error:
+        message = str(error)
+        status_code = 404 if "bulunamadı" in message.lower() else 500
+        raise HTTPException(status_code=status_code, detail=message)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Video yeniden üretim hatası: {str(error)}")
+
+
 @app.post("/api/produce-gemini-batch")
 def produce_gemini_batch(
     payload: GeminiBatchPayload,
@@ -5179,7 +5266,7 @@ def sync_single_video_from_server(channel_id: str, job_id: str):
         runner = RemoteRunner()
         if not runner.is_reachable():
             raise HTTPException(status_code=503, detail="Oracle Cloud sunucusuna bağlanılamadı.")
-        res = runner.download_and_cleanup_job(channel_id=channel_id, job_id=job_id, delete_remote=True)
+        res = runner.download_and_cleanup_job(channel_id=channel_id, job_id=job_id, delete_remote=True, force=True)
         return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -5285,7 +5372,7 @@ def download_server_render_job(job_id: str, payload: ServerRenderDownloadPayload
                     ch_id = v.get("channel_id")
                     break
 
-        res = runner.download_and_cleanup_job(channel_id=ch_id, job_id=job_id, delete_remote=True)
+        res = runner.download_and_cleanup_job(channel_id=ch_id, job_id=job_id, delete_remote=True, force=True)
         clone_note = " (🎙️ RVC Klon Ses Giydirildi)" if res.get("voice_clone_applied") else ""
         return {
             "success": True,
@@ -5338,6 +5425,105 @@ class ApplyVoiceClonePayload(BaseModel):
     clone_id: Optional[str] = None
     pitch: Optional[int] = 0
     formant: Optional[float] = 1.0
+
+
+class VideoVoiceoverRequest(BaseModel):
+    video_path: str
+    clone_id: str
+
+
+@app.post("/api/video-voiceover/videos")
+def upload_video_for_voiceover(file: UploadFile = File(...)):
+    allowed_extensions = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
+    original_name = Path(file.filename or "").name
+    extension = Path(original_name).suffix.lower()
+    if extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Desteklenmeyen video biçimi. İzin verilenler: {', '.join(sorted(allowed_extensions))}",
+        )
+
+    output_root = Path(settings_mgr.get("output_dir", "output")).resolve()
+    upload_dir = output_root / "_voiceover_uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    safe_stem = re.sub(r"[^A-Za-z0-9_-]+", "_", Path(original_name).stem).strip("_")[:100] or "video"
+    video_path = upload_dir / f"{uuid.uuid4().hex}_{safe_stem}{extension}"
+    try:
+        with video_path.open("wb") as destination:
+            shutil.copyfileobj(file.file, destination)
+        if video_path.stat().st_size == 0:
+            video_path.unlink()
+            raise HTTPException(status_code=400, detail="Seçilen video dosyası boş.")
+    except HTTPException:
+        raise
+    except OSError as exc:
+        video_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="Video sunucuya kaydedilemedi.") from exc
+    finally:
+        file.file.close()
+
+    return {"success": True, "video_path": str(video_path), "filename": original_name}
+
+
+@app.post("/api/video-voiceover/jobs")
+def start_video_voiceover(payload: VideoVoiceoverRequest):
+    output_root = Path(settings_mgr.get("output_dir", "output")).resolve()
+    video_path = Path(payload.video_path).resolve()
+    try:
+        video_path.relative_to(output_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Yalnızca çıktı klasörünüzdeki videolar işlenebilir.") from exc
+    if not video_path.is_file() or video_path.suffix.lower() not in {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}:
+        raise HTTPException(status_code=404, detail="Seçilen video bulunamadı veya desteklenmiyor.")
+
+    from voice_clone_manager import VoiceCloneManager
+    clone = VoiceCloneManager().get_clone(payload.clone_id)
+    if not clone:
+        raise HTTPException(status_code=404, detail="Seçilen klon ses bulunamadı.")
+    voice_prompt = next(
+        (Path(prompt) for prompt in (clone.get("voice_pt_path"), clone.get("voice_wav_path")) if prompt and Path(prompt).is_file()),
+        None,
+    )
+    if not voice_prompt:
+        raise HTTPException(status_code=400, detail="Seçilen klon sesin Chatterbox ses profili bulunamadı.")
+
+    from video_voiceover import VideoVoiceoverManager
+    try:
+        job_id = VideoVoiceoverManager().start_job(
+            video_path=video_path,
+            clone_id=payload.clone_id,
+            clone_name=clone.get("name") or payload.clone_id,
+            voice_prompt_path=voice_prompt,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"success": True, "job_id": job_id}
+
+
+@app.get("/api/video-voiceover/jobs/{job_id}")
+def get_video_voiceover_job(job_id: str):
+    from video_voiceover import VideoVoiceoverManager
+    job = VideoVoiceoverManager().get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Ses klonlama işi bulunamadı.")
+    return job
+
+
+@app.get("/api/video-voiceover/jobs/{job_id}/video")
+def get_video_voiceover_output(job_id: str):
+    from video_voiceover import VideoVoiceoverManager
+    job = VideoVoiceoverManager().get_job(job_id)
+    if not job or job.get("status") != "completed" or not job.get("result", {}).get("video_path"):
+        raise HTTPException(status_code=404, detail="Seslendirilmiş video çıktısı bulunamadı.")
+    video_path = Path(job["result"]["video_path"]).resolve()
+    output_root = Path(settings_mgr.get("output_dir", "output")).resolve()
+    try:
+        video_path.relative_to(output_root)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Çıktı dosyası video klasörünüzün dışında.") from exc
+    if not video_path.is_file():
+        raise HTTPException(status_code=404, detail="Seslendirilmiş video dosyası silinmiş.")
+    return FileResponse(video_path, media_type="video/mp4", filename=video_path.name)
 
 
 @app.post("/api/videos/apply-voice-clone")
@@ -5810,6 +5996,12 @@ def start_routine_scheduler_background_thread():
 
     t = threading.Thread(target=_routine_scheduler_loop, daemon=True)
     t.start()
+
+    try:
+        from retention_manager import start_retention_daemon
+        start_retention_daemon(interval_hours=12)
+    except Exception as e:
+        print(f"[RETENTION] Saklama denetçisi başlatma hatası: {e}")
 
 
 
@@ -8839,8 +9031,157 @@ def api_generate_story_video(payload: StoryVideoRequest, background_tasks: Backg
     }
 
 
+# ═══════════════════════════════════════════════════════════════
+# VOICE ENGINE — OpenAI-compatible Local Audio API (/v1)
+# ═══════════════════════════════════════════════════════════════
+try:
+    from voice_engine import router as voice_router
+    app.include_router(voice_router)
+    print("[VOICE-ENGINE] 🎙️ OpenAI-compatible Local Audio API mounted at /v1")
+except Exception as _ve_err:
+    print(f"[VOICE-ENGINE] ⚠️ Could not mount voice_engine router: {_ve_err}")
 
 
+# ═══════════════════════════════════════════════════════════════
+# STORY DRAFTS & MULTI-PART PROCEDURAL ANIMATION API
+# ═══════════════════════════════════════════════════════════════
+
+try:
+    from story_manager import StoryManager
+except ImportError:
+    StoryManager = None
+
+
+class StoryDraftCreateRequest(BaseModel):
+    channel_id: str
+    title: str
+    raw_text: str
+    target_language: Optional[str] = "tr"
+    genre: Optional[str] = "sci_fi_mystery"
+    plot_notes: Optional[str] = ""
+    author: Optional[str] = "Antigravity Storyteller"
+    developed_story: Optional[dict] = None
+
+
+@app.get("/api/stories")
+def api_list_stories(channel_id: Optional[str] = Query(None)):
+    """Hikaye taslaklarını listeler."""
+    if not StoryManager:
+        raise HTTPException(status_code=500, detail="StoryManager yüklenemedi.")
+    mgr = StoryManager()
+    stories = mgr.list_stories(channel_id=channel_id)
+    return {"success": True, "count": len(stories), "stories": stories}
+
+
+@app.get("/api/stories/{story_id}")
+def api_get_story(story_id: str):
+    """Tekil bir hikaye taslağını getirir."""
+    if not StoryManager:
+        raise HTTPException(status_code=500, detail="StoryManager yüklenemedi.")
+    mgr = StoryManager()
+    story = mgr.get_story(story_id)
+    if not story:
+        raise HTTPException(status_code=404, detail="Hikaye taslağı bulunamadı.")
+    return {"success": True, "story": story}
+
+
+@app.post("/api/stories")
+def api_create_story(payload: StoryDraftCreateRequest):
+    """Yeni bir kullanıcı hikaye taslağı oluşturur."""
+    if not StoryManager:
+        raise HTTPException(status_code=500, detail="StoryManager yüklenemedi.")
+    mgr = StoryManager()
+    created = mgr.create_story(
+        channel_id=payload.channel_id,
+        title=payload.title,
+        raw_text=payload.raw_text,
+        target_language=payload.target_language or "tr",
+        genre=payload.genre or "sci_fi_mystery",
+        plot_notes=payload.plot_notes or "",
+        developed_story=payload.developed_story,
+        author=payload.author
+    )
+    return {"success": True, "story": created}
+
+
+@app.put("/api/stories/{story_id}")
+def api_update_story(story_id: str, payload: dict = Body(...)):
+    """Mevcut bir hikaye taslağını günceller."""
+    if not StoryManager:
+        raise HTTPException(status_code=500, detail="StoryManager yüklenemedi.")
+    mgr = StoryManager()
+    updated = mgr.update_story(story_id, payload)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Hikaye taslağı bulunamadı.")
+    return {"success": True, "story": updated}
+
+
+@app.delete("/api/stories/{story_id}")
+def api_delete_story(story_id: str):
+    """Hikaye taslağını siler."""
+    if not StoryManager:
+        raise HTTPException(status_code=500, detail="StoryManager yüklenemedi.")
+    mgr = StoryManager()
+    ok = mgr.delete_story(story_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Hikaye taslağı bulunamadı.")
+    return {"success": True, "message": "Hikaye taslağı silindi."}
+
+
+@app.post("/api/stories/{story_id}/convert-to-material")
+def api_convert_story_to_material(story_id: str):
+    """Geliştirilen hikayeyi çok bölümlü üretim materyallerine dönüştürür."""
+    if not StoryManager:
+        raise HTTPException(status_code=500, detail="StoryManager yüklenemedi.")
+    mgr = StoryManager()
+    try:
+        res = mgr.convert_to_materials(story_id)
+        return {"success": True, "data": res}
+    except Exception as ex:
+        raise HTTPException(status_code=400, detail=str(ex))
+
+
+@app.post("/api/stories/{story_id}/produce")
+def api_produce_story_video(story_id: str, background_tasks: BackgroundTasks, payload: dict = Body({})):
+    """Kodla çizilen prosedürel Aurora animasyon motoru ile Shorts bölümleri üretir."""
+    if not StoryManager:
+        raise HTTPException(status_code=500, detail="StoryManager yüklenemedi.")
+    mgr = StoryManager()
+    story = mgr.get_story(story_id)
+    if not story:
+        raise HTTPException(status_code=404, detail="Hikaye taslağı bulunamadı.")
+
+    exec_id = f"story_anim_{uuid.uuid4().hex[:8]}"
+    executions[exec_id] = {
+        "status": "pending",
+        "message": f"'{story.get('title')}' prosedürel animasyon Shorts bölümleri hazırlanıyor...",
+        "timestamp": datetime.now().isoformat(),
+        "channel_id": story.get("channel_id"),
+    }
+
+    def _task():
+        executions[exec_id]["status"] = "running"
+        try:
+            from story_animation_engine import StoryAnimationEngine
+            engine = StoryAnimationEngine()
+            results = engine.render_all_parts_for_story(
+                story_id=story_id,
+                channel_id=story.get("channel_id"),
+                bgm_path=payload.get("bgm_path")
+            )
+            executions[exec_id]["status"] = "completed"
+            executions[exec_id]["results"] = results
+            executions[exec_id]["message"] = f"Toplam {len(results)} Shorts bölümü başarıyla üretildi!"
+        except Exception as ex:
+            executions[exec_id]["status"] = "failed"
+            executions[exec_id]["message"] = f"Üretim hatası: {ex}"
+
+    background_tasks.add_task(_task)
+    return {
+        "success": True,
+        "exec_id": exec_id,
+        "message": f"'{story.get('title')}' hikaye animasyonu üretimi arka planda başlatıldı."
+    }
 
 
 # Output klasörünü statik olarak bağla (uzantı videoyu Blob olarak indirebilsin)

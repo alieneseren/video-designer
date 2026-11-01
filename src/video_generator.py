@@ -24,6 +24,8 @@ import re
 import json
 import asyncio
 import requests
+import shutil
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -141,6 +143,40 @@ SHORTS_MAX_DURATION = 59
 
 # Ortalama konuşma hızı (kelime/saniye) — edge-tts için yaklaşık
 AVG_WORDS_PER_SEC = 2.6
+
+
+def _truncate_scenes_to_word_limit(scenes: list[dict], word_limit: int) -> list[dict]:
+    remaining = max(0, word_limit)
+    truncated = []
+    for scene in scenes:
+        text = str(scene.get("narration") or "").strip()
+        words = text.split()
+        if not words or remaining <= 0:
+            break
+        if len(words) <= remaining:
+            truncated.append(dict(scene))
+            remaining -= len(words)
+            continue
+
+        kept_text = " ".join(words[:remaining])
+        last_sentence_end = max(kept_text.rfind("."), kept_text.rfind("!"), kept_text.rfind("?"))
+        if last_sentence_end > 0:
+            kept_text = kept_text[:last_sentence_end + 1]
+        else:
+            kept_text += "."
+        truncated.append({**scene, "narration": kept_text})
+        break
+    return truncated
+
+
+def _scene_word_ranges(scenes: list[dict]) -> list[tuple[int, int]]:
+    ranges = []
+    cursor = 0
+    for scene in scenes:
+        count = len(str(scene.get("narration") or "").split())
+        ranges.append((cursor, cursor + count))
+        cursor += count
+    return ranges
 
 
 def estimate_subtitle_segments(
@@ -438,17 +474,85 @@ class AudioGenerator:
             voice = VOICE_MAP.get(lang, "en-US-GuyNeural")
             boundaries = []
             try:
-                communicate = edge_tts.Communicate(text, voice)
-                with open(output_path, "wb") as f:
-                    async for chunk in communicate.stream():
-                        if chunk["type"] == "audio":
-                            f.write(chunk["data"])
-                        elif chunk["type"] == "SentenceBoundary":
-                            boundaries.append({
-                                "text": chunk["text"],
-                                "offset": chunk["offset"] / 10000000.0,
-                                "duration": chunk["duration"] / 10000000.0
-                            })
+                scene_texts = [
+                    (idx, str(scene.get("narration") or "").strip())
+                    for idx, scene in enumerate(scenes or [])
+                    if str(scene.get("narration") or "").strip()
+                ]
+                use_scene_audio = (
+                    len(scene_texts) > 1
+                    and len(scene_texts) == len(scenes or [])
+                )
+                if use_scene_audio:
+                    scene_audio_paths = []
+                    scene_offset = 0.0
+                    with tempfile.TemporaryDirectory(
+                        prefix=".tts-scenes-", dir=str(Path(output_path).parent)
+                    ) as temp_dir:
+                        for scene_idx, scene_text in scene_texts:
+                            scene_path = str(Path(temp_dir) / f"scene_{scene_idx:04d}.mp3")
+                            scene_boundaries = []
+                            communicate = edge_tts.Communicate(scene_text, voice)
+                            with open(scene_path, "wb") as f:
+                                async for chunk in communicate.stream():
+                                    if chunk["type"] == "audio":
+                                        f.write(chunk["data"])
+                                    elif chunk["type"] == "SentenceBoundary":
+                                        scene_boundaries.append({
+                                            "text": chunk["text"],
+                                            "offset": chunk["offset"] / 10000000.0,
+                                            "duration": chunk["duration"] / 10000000.0,
+                                            "scene_idx": scene_idx,
+                                        })
+                            with AudioFileClip(scene_path) as scene_audio:
+                                scene_duration = scene_audio.duration
+                            if scene_duration <= 0:
+                                raise RuntimeError(f"TTS sahne {scene_idx} için ses süresi ölçülemedi.")
+                            if not scene_boundaries:
+                                scene_boundaries = [{
+                                    "text": scene_text,
+                                    "offset": 0.0,
+                                    "duration": scene_duration,
+                                    "scene_idx": scene_idx,
+                                }]
+                            for boundary in scene_boundaries:
+                                boundary["offset"] += scene_offset
+                            boundaries.extend(scene_boundaries)
+                            scene_audio_paths.append(scene_path)
+                            scene_offset += scene_duration
+
+                        if len(scene_audio_paths) == 1:
+                            shutil.copyfile(scene_audio_paths[0], output_path)
+                        else:
+                            command = ["ffmpeg", "-y"]
+                            for scene_path in scene_audio_paths:
+                                command.extend(["-i", scene_path])
+                            audio_inputs = "".join(f"[{idx}:a:0]" for idx in range(len(scene_audio_paths)))
+                            command.extend([
+                                "-filter_complex",
+                                f"{audio_inputs}concat=n={len(scene_audio_paths)}:v=0:a=1[aout]",
+                                "-map", "[aout]",
+                                "-c:a", "libmp3lame",
+                                "-q:a", "2",
+                                output_path,
+                            ])
+                            result = subprocess.run(command, capture_output=True, text=True)
+                            if result.returncode != 0:
+                                raise RuntimeError(f"Sahne sesleri birleştirilemedi: {result.stderr[-1200:]}")
+                            if not Path(output_path).is_file() or Path(output_path).stat().st_size == 0:
+                                raise RuntimeError("Sahne sesleri birleştirildi ancak ses dosyası oluşturulamadı.")
+                else:
+                    communicate = edge_tts.Communicate(text, voice)
+                    with open(output_path, "wb") as f:
+                        async for chunk in communicate.stream():
+                            if chunk["type"] == "audio":
+                                f.write(chunk["data"])
+                            elif chunk["type"] == "SentenceBoundary":
+                                boundaries.append({
+                                    "text": chunk["text"],
+                                    "offset": chunk["offset"] / 10000000.0,
+                                    "duration": chunk["duration"] / 10000000.0
+                                })
 
                 # RVC (Applio) Post-Processing for Edge-TTS
                 rvc_pth = self.settings.get("rvc_pth_path")
@@ -863,12 +967,21 @@ class VideoGenerator:
         Boundary'leri → segment listesi (text, duration, image_path).
         Her boundary önce 6 kelimelik alt parçalara bölünür, sonra image atanır.
         """
+        ordered_boundaries = sorted(boundaries, key=lambda boundary: float(boundary.get("offset", 0.0)))
         valid_boundaries = []
-        for b in boundaries:
-            if b["offset"] < real_duration:
-                if b["offset"] + b["duration"] > real_duration:
-                    b["duration"] = real_duration - b["offset"]
-                valid_boundaries.append(b)
+        for boundary_index, b in enumerate(ordered_boundaries):
+            start = max(0.0, float(b.get("offset", 0.0)))
+            if start < real_duration:
+                speech_end = start + max(0.0, float(b.get("duration", 0.0)))
+                next_start = (
+                    float(ordered_boundaries[boundary_index + 1].get("offset", real_duration))
+                    if boundary_index + 1 < len(ordered_boundaries)
+                    else real_duration
+                )
+                # Keep pauses in the timeline rather than compressing them out of the visuals.
+                end = min(real_duration, max(speech_end, start, next_start))
+                if end > start:
+                    valid_boundaries.append({**b, "duration": end - start})
 
         segments = []
         for b in valid_boundaries:
@@ -899,12 +1012,34 @@ class VideoGenerator:
 
         return segments
 
-    def _resolve_reddit_bgm(self, is_reddit: bool, script: dict, edit_options: dict, narration: str, title: str) -> Optional[str]:
+    def _resolve_reddit_bgm(self, is_reddit: bool, script: dict, edit_options: dict, narration: str, title: str, work_dir: Optional[Path] = None, duration: float = 0.0) -> Optional[str]:
         """
-        Reddit Hikayeleri için arka plan müziği çözümler.
-        Kullanıcı zaten bgm_path belirlediyse onu kullanır.
-        Yoksa ses kütüphanesinden uygun bir müzik dosyası seçer.
+        Arka plan müziği çözümler:
+        1. script içinde bgm_timeline varsa build_timeline_bgm_track ile telifsiz müzikleri birleştirir.
+        2. Kullanıcı tarafından ayarlanmış geçerli bir yol varsa onu kullanır.
+        3. Reddit hikayesi ise resmi müziği seçer.
+        4. Diğer kategoriler için uygun parçayı audio_library'den seçer.
         """
+        # 1. bgm_timeline kontrolü
+        if isinstance(script, dict) and script.get("bgm_timeline") and work_dir and duration > 1.0:
+            try:
+                try:
+                    import audio_library as _al
+                except ImportError:
+                    import src.audio_library as _al
+                bgm_vol = float(edit_options.get("bgm_volume") or 0.08)
+                mixed_track = _al.build_timeline_bgm_track(
+                    bgm_timeline=script["bgm_timeline"],
+                    total_duration=duration,
+                    work_dir=Path(work_dir),
+                    base_volume=bgm_vol
+                )
+                if mixed_track and mixed_track.is_file():
+                    print(f"[VIDEO-GEN-BGM] bgm_timeline başarıyla derlendi: {mixed_track.name}")
+                    return str(mixed_track)
+            except Exception as bt_err:
+                print(f"[VIDEO-GEN-BGM] bgm_timeline hatası: {bt_err}")
+
         # Kullanıcı tarafından ayarlanmış geçerli bir yol varsa onu kullan
         user_bgm = edit_options.get("bgm_path")
         if user_bgm and str(user_bgm).lower() not in ("none", "false", "") and os.path.exists(user_bgm):
@@ -1082,7 +1217,13 @@ class VideoGenerator:
         # Crayon Combat & Askeri/Teknoloji Hiciv & Boş Kafa / Blackbox Çöp Adam kanalları: Tam kare animasyonlu çöp adam ve infografik motoruna yönlendir
         is_crayon = (topic_category in ("crayon_combat", "military", "military_tech", "crayon_capital", "tech_finance_essay", "stickman", "copadam", "cop_adam", "boskafa", "bos_kafa", "absurd_science", "what_if", "whatif", "absurd_engineering", "aviation", "blackbox", "havacilik", "flight", "flight_disaster", "air_crash")
                      or any(k in channel_id.lower() for k in ("crayon", "stickman", "boskafa", "copadam", "tacticallcrayon", "whatif", "absurd", "simulat", "blackbox", "aviation")))
-        if is_crayon and script.get("scenes"):
+        is_crayon_combat = topic_category in ("crayon_combat", "military", "military_tech") or (
+            "tacticallcrayon" in channel_id.lower()
+        )
+        has_crayon_material = bool(script.get("scenes")) or (
+            is_crayon_combat and bool(script.get("timeline_scenes"))
+        )
+        if is_crayon and has_crayon_material:
             try:
                 from stickman_engine.crayon_generator import generate_crayon_video
             except ImportError:
@@ -1138,18 +1279,27 @@ class VideoGenerator:
 
         # Sahneleri birleştirerek tam narration'ı oluştur
         scenes = script.get("scenes", [])
-        if scenes and not narration:
+        scenes_have_complete_narration = bool(scenes) and all(
+            str(scene.get("narration") or "").strip() for scene in scenes
+        )
+        if scenes_have_complete_narration:
+            narration = " ".join(str(scene["narration"]).strip() for scene in scenes)
+        elif scenes and not narration:
             narration = " ".join(s.get("narration", "") for s in scenes)
 
         # Shorts için kelime kısıtı — Reddit 2-3dk uzun olduğundan kapsam dışı
         if shorts_mode and not is_reddit:
             words = narration.split()
             if len(words) > 130:
-                truncated = " ".join(words[:130])
-                last_punct = max(
-                    truncated.rfind("."), truncated.rfind("!"), truncated.rfind("?")
-                )
-                narration = truncated[:last_punct + 1] if last_punct > 0 else truncated + "."
+                if scenes_have_complete_narration:
+                    scenes = _truncate_scenes_to_word_limit(scenes, 130)
+                    narration = " ".join(scene["narration"] for scene in scenes)
+                else:
+                    truncated = " ".join(words[:130])
+                    last_punct = max(
+                        truncated.rfind("."), truncated.rfind("!"), truncated.rfind("?")
+                    )
+                    narration = truncated[:last_punct + 1] if last_punct > 0 else truncated + "."
 
         # 1) TTS
         try:
@@ -1333,6 +1483,7 @@ class VideoGenerator:
             for i, scene in enumerate(scenes):
                 scene_targets.append({
                     "index": i,
+                    "narration": scene.get("narration", ""),
                     "nasa_keywords": scene.get("nasa_keywords", ""),
                     "image_prompt": scene.get("image_prompt", ""),
                 })
@@ -1341,6 +1492,7 @@ class VideoGenerator:
             for i, b in enumerate(boundaries):
                 scene_targets.append({
                     "index": i,
+                    "narration": b.get("text", ""),
                     "nasa_keywords": keywords[i % len(keywords)] if keywords else "",
                     "image_prompt": b.get("text", "") or (keywords[0] if keywords else "space astronomy"),
                 })
@@ -1644,38 +1796,47 @@ class VideoGenerator:
                         except Exception as e:
                             print(f"[GEMINI-WEB] URL indirme hatası (Sahne {idx}): {e}")
                     elif isinstance(img_data, str) and (os.path.exists(img_data) or img_data.startswith("/") or img_data.startswith("file://")):
-                        # Yerel görsel yolu veya file:// URL'si kullanımı
+                        # Yerel görsel veya video yolu kullanımı
                         try:
                             file_path = img_data
                             if file_path.startswith("file://"):
                                 file_path = file_path[7:]
                                 
-                            im = Image.open(file_path).convert("RGB")
-                            src_w, src_h = im.size
-                            target_w = editor_cfg_W
-                            target_h = editor_cfg_H
-                            
-                            src_ratio = src_w / src_h
-                            tgt_ratio = target_w / target_h
-                            
-                            if src_ratio > tgt_ratio:
-                                new_h = target_h
-                                new_w = int(new_h * src_ratio)
+                            if file_path.lower().endswith((".mp4", ".mov", ".webm", ".mkv")):
+                                import shutil
+                                if os.path.exists(file_path):
+                                    if file_path != dest_vid:
+                                        shutil.copy2(file_path, dest_vid)
+                                    scene_images[idx] = dest_vid
+                                    image_obtained = True
+                                    print(f"[PRE-RESEARCH] Önceden doğrulanmış video klip bağlandı (Sahne {idx}): {dest_vid}")
                             else:
-                                new_w = target_w
-                                new_h = int(new_w / src_ratio)
+                                im = Image.open(file_path).convert("RGB")
+                                src_w, src_h = im.size
+                                target_w = editor_cfg_W
+                                target_h = editor_cfg_H
                                 
-                            im = im.resize((new_w, new_h), Image.LANCZOS)
-                            left = (new_w - target_w) // 2
-                            top  = (new_h - target_h) // 2
-                            im = im.crop((left, top, left + target_w, top + target_h))
-                            im.save(dest_img, "JPEG", quality=95)
-                            
-                            scene_images[idx] = dest_img
-                            image_obtained = True
-                            print(f"[REUSE-IMAGE] Yerel görsel başarıyla kullanıldı (Sahne {idx}): {dest_img}")
+                                src_ratio = src_w / src_h
+                                tgt_ratio = target_w / target_h
+                                
+                                if src_ratio > tgt_ratio:
+                                    new_h = target_h
+                                    new_w = int(new_h * src_ratio)
+                                else:
+                                    new_w = target_w
+                                    new_h = int(new_w / src_ratio)
+                                    
+                                im = im.resize((new_w, new_h), Image.LANCZOS)
+                                left = (new_w - target_w) // 2
+                                top  = (new_h - target_h) // 2
+                                im = im.crop((left, top, left + target_w, top + target_h))
+                                im.save(dest_img, "JPEG", quality=95)
+                                
+                                scene_images[idx] = dest_img
+                                image_obtained = True
+                                print(f"[PRE-RESEARCH] Önceden doğrulanmış görsel bağlandı (Sahne {idx}): {dest_img}")
                         except Exception as e:
-                            print(f"[REUSE-IMAGE] Yerel görsel yükleme/kırpma hatası (Sahne {idx}): {e}")
+                            print(f"[PRE-RESEARCH] Yerel medya yükleme hatası (Sahne {idx}): {e}")
 
             # Space/science channels query NASA first
             if not image_obtained and use_nasa:
@@ -1779,8 +1940,54 @@ class VideoGenerator:
                 except Exception as cc_err:
                     print(f"[CRAYON-COMBAT] Sahne {idx} blueprint üretim hatası: {cc_err}")
 
-            # Fallback to Stable Diffusion — Reddit ve Crayon Combat kategorisinde ASLA SD üretimi yapma
-            if not image_obtained and not is_reddit and topic_category not in ("crayon_combat", "military", "military_tech"):
+            # Telifsiz Gerçek Video ve Fotoğraf Çekim Motoru (Seyahat, Basketbol ve Gerçek B-Roll İsteyen Kanallar)
+            is_real_footage_category = topic_category in (
+                "travel", "gezi", "letstravel", "letstraveii",
+                "basketball_analysis", "basketball", "sports", "nba", "thebasketballshows"
+            )
+            if not image_obtained and is_real_footage_category:
+                try:
+                    try:
+                        from real_media_fetcher import get_real_scene_media
+                    except ImportError:
+                        from src.real_media_fetcher import get_real_scene_media
+
+                    topic_title = script.get("topic") or script.get("title") or ""
+                    scene_dur = 5.0
+                    if scenes and idx < len(scenes):
+                        matching_durs = [b.get("duration", 0.0) for b in boundaries if b.get("scene_idx") == idx]
+                        if matching_durs:
+                            scene_dur = sum(matching_durs)
+                        elif len(boundaries) == len(scenes):
+                            scene_dur = boundaries[idx].get("duration", 5.0)
+                    elif boundaries and idx < len(boundaries):
+                        scene_dur = boundaries[idx].get("duration", 5.0)
+
+                    real_media_path = get_real_scene_media(
+                        category=topic_category,
+                        scene_idx=idx,
+                        total_scenes=len(scene_targets),
+                        topic=topic_title,
+                        scene_data=target,
+                        work_dir=work_dir,
+                        target_w=editor_cfg_W,
+                        target_h=editor_cfg_H,
+                        target_dur=max(3.0, scene_dur),
+                        session_used=aviation_used_media
+                    )
+                    if real_media_path and os.path.exists(real_media_path):
+                        scene_images[idx] = real_media_path
+                        image_obtained = True
+                        print(f"[REAL-MEDIA] Sahne {idx} için telifsiz gerçek medya bağlandı: {real_media_path}")
+                except Exception as rm_err:
+                    print(f"[REAL-MEDIA] Gerçek medya arama hatası (Sahne {idx}): {rm_err}")
+
+            # Fallback to Stable Diffusion — Reddit, Crayon Combat, Seyahat ve Basketbol kategorisinde ASLA SD üretimi yapma
+            if not image_obtained and not is_reddit and topic_category not in (
+                "crayon_combat", "military", "military_tech",
+                "travel", "gezi", "letstravel", "letstraveii",
+                "basketball_analysis", "basketball", "sports", "nba", "thebasketballshows"
+            ):
                 prompt = target.get("image_prompt", "").strip()
                 if not prompt:
                     prompt = keywords[0] if keywords else "space science photography"
@@ -1915,44 +2122,29 @@ class VideoGenerator:
                         scene_images[idx] = target_fallback
                     print(f"[FALLBACK] Sahne {idx} kopyalama hatası: {e}")
 
-        images = [scene_images.get(idx, "") for idx in range(len(scene_targets))]
-
         # Map boundaries to scene images
         if scenes:
-            def clean_text(t):
-                import re
-                return re.sub(r'[^\w]', '', t.lower())
-                
-            scene_texts = [clean_text(s.get("narration", "")) for s in scenes]
-            char_to_scene = []
-            for s_idx, st in enumerate(scene_texts):
-                for _ in range(len(st)):
-                    char_to_scene.append(s_idx)
-                    
+            scene_word_ranges = _scene_word_ranges(scenes)
             boundary_mapping = []
-            current_idx_in_clean = 0
+            current_word_offset = 0
             for b in boundaries:
                 if "scene_idx" in b and isinstance(b["scene_idx"], int) and b["scene_idx"] < len(scenes):
                     boundary_mapping.append(b["scene_idx"])
+                    current_word_offset += len(str(b.get("text") or "").split())
                     continue
-                b_clean = clean_text(b["text"])
-                if not b_clean:
+                word_count = len(str(b.get("text") or "").split())
+                if not word_count:
                     boundary_mapping.append(boundary_mapping[-1] if boundary_mapping else 0)
                     continue
-                best_scene = 0
-                if char_to_scene:
-                    start = current_idx_in_clean
-                    end = min(start + len(b_clean), len(char_to_scene))
-                    if start < end:
-                        scene_counts = {}
-                        for char_pos in range(start, end):
-                            sc = char_to_scene[char_pos]
-                            scene_counts[sc] = scene_counts.get(sc, 0) + 1
-                        best_scene = max(scene_counts, key=scene_counts.get)
-                    else:
-                        best_scene = char_to_scene[-1]
-                    current_idx_in_clean = end
+                boundary_start = current_word_offset
+                boundary_end = current_word_offset + word_count
+                scene_overlaps = [
+                    (max(0, min(boundary_end, scene_end) - max(boundary_start, scene_start)), scene_idx)
+                    for scene_idx, (scene_start, scene_end) in enumerate(scene_word_ranges)
+                ]
+                best_scene = max(scene_overlaps, default=(0, 0))[1]
                 boundary_mapping.append(best_scene)
+                current_word_offset = boundary_end
 
         # Check if Local I2V (Image-to-Video) module is enabled
         enable_i2v_val = edit_options.get("enable_i2v", False)
@@ -1969,6 +2161,7 @@ class VideoGenerator:
 
         W = 1080 if (shorts_mode or is_reddit) else 1920
         H = 1920 if (shorts_mode or is_reddit) else 1080
+        source_scene_images = dict(scene_images)
 
         if enable_i2v_enabled:
             print(f"[I2V-ANIMATOR] Görsel Hareketlendirme (Yerel I2V Modülü) Aktif.")
@@ -1988,7 +2181,7 @@ class VideoGenerator:
                     img_p = scene_images.get(idx, "")
                     valid_imgs.append(img_p)
 
-                    prompt_txt = target.get("image_prompt") or target.get("nasa_keywords") or (keywords[idx % len(keywords)] if keywords else "")
+                    prompt_txt = target.get("narration") or target.get("image_prompt") or target.get("nasa_keywords") or (keywords[idx % len(keywords)] if keywords else "")
                     scene_prompts.append(prompt_txt)
 
                     dur = 0.0
@@ -2038,6 +2231,58 @@ class VideoGenerator:
             for idx, b in enumerate(boundaries):
                 b["image_path"] = scene_images.get(idx, "")
 
+        try:
+            try:
+                from visual_content_guard import visual_guard
+            except ImportError:
+                from src.visual_content_guard import visual_guard
+            if is_reddit:
+                print("[VISUAL-QA] Reddit hikâyelerinde ASMR arka planı tasarım gereği anlatımdan bağımsız; sahne semantik kontrolü uygulanmadı.")
+            elif visual_guard.semantic_model_available:
+                for target in scene_targets:
+                    idx = target["index"]
+                    asset_path = scene_images.get(idx, "")
+                    if not asset_path or not os.path.exists(asset_path):
+                        raise RuntimeError(f"Görsel-ses uyum kontrolü sahne {idx + 1}'de görsel bulamadı.")
+                    accepted, score, reason = visual_guard.verify_scene_asset(
+                        asset_path,
+                        target.get("narration") or target.get("image_prompt", ""),
+                        topic_category,
+                        script.get("topic") or title,
+                    )
+                    if not accepted:
+                        source_path = source_scene_images.get(idx, "")
+                        if source_path and source_path != asset_path and os.path.exists(source_path):
+                            source_accepted, _, source_reason = visual_guard.verify_scene_asset(
+                                source_path,
+                                target.get("narration") or target.get("image_prompt", ""),
+                                topic_category,
+                                script.get("topic") or title,
+                            )
+                            if source_accepted:
+                                scene_images[idx] = source_path
+                                print(
+                                    f"[VISUAL-QA] Hareketlendirilmiş sahne {idx + 1} anlatımla uyuşmadı; "
+                                    f"doğrulanmış kaynak görsele dönüldü ({source_reason})."
+                                )
+                                continue
+                        raise RuntimeError(
+                            f"Görsel-ses uyum kontrolü sahne {idx + 1}'i reddetti "
+                            f"(skor {score:.2f}): {reason}. Görsel yeniden seçilmeden video oluşturulmadı."
+                        )
+            else:
+                raise RuntimeError(
+                    "Ses-görsel uyumu doğrulanamadı: CLIP modeli yüklenemedi. "
+                    "Görsel uyum kontrolü olmadan video üretilmedi; internet bağlantısını ve "
+                    "torch/transformers kurulumunu kontrol edip yeniden deneyin."
+                )
+        except RuntimeError:
+            raise
+        except Exception as visual_qc_error:
+            raise RuntimeError(f"Son ses-görsel doğrulaması başarısız oldu: {visual_qc_error}") from visual_qc_error
+
+        images = [scene_images.get(idx, "") for idx in range(len(scene_targets))]
+
         # 5) Segmentleri oluştur
         segments = self._build_segments(
             boundaries, real_duration, True, images, scene_images,
@@ -2072,6 +2317,10 @@ class VideoGenerator:
         except (ValueError, TypeError):
             resolved_bgm_vol = 0.35 if is_reddit else 0.20
 
+        resolved_bgm_path = self._resolve_reddit_bgm(is_reddit, script, edit_options, narration, title, work_dir=work_dir, duration=real_duration)
+        if resolved_bgm_path and "bgm_timeline_mixed" in str(resolved_bgm_path):
+            resolved_bgm_vol = 1.0
+
         edit_cfg = EditConfig(
             transition=edit_options.get("transition") or ("none" if is_reddit else transition),
             transition_dur=edit_options.get("transition_dur", 0.5),
@@ -2080,7 +2329,7 @@ class VideoGenerator:
             width=W,
             height=H,
             shorts_mode=shorts_mode,
-            bgm_path=self._resolve_reddit_bgm(is_reddit, script, edit_options, narration, title),
+            bgm_path=resolved_bgm_path,
             bgm_volume=resolved_bgm_vol,
             watermark_path=edit_options.get("watermark_path"),
             watermark_text=edit_options.get("watermark_text"),

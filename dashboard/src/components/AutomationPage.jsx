@@ -20,7 +20,8 @@ import {
   ArrowRight,
   ShieldCheck,
   Cpu,
-  Power
+  Power,
+  RotateCcw
 } from "lucide-react";
 
 export default function AutomationPage({ channels = [], groups = [], onNavigateServerRender }) {
@@ -35,8 +36,36 @@ export default function AutomationPage({ channels = [], groups = [], onNavigateS
   const [dispatching, setDispatching] = useState(false);
   const [dispatchModal, setDispatchModal] = useState(null);
   const [downloadingJobId, setDownloadingJobId] = useState(null);
+  const [regeneratingJobId, setRegeneratingJobId] = useState(null);
   const [downloadMessage, setDownloadMessage] = useState(null);
   const [autoYoutubeUpload, setAutoYoutubeUpload] = useState(false);
+  const [researchingKey, setResearchingKey] = useState(null);
+
+  const handleResearchPlan = async (p) => {
+    const matId = p.material_id || p.id;
+    if (!matId) {
+      alert("Hata: Materyal ID bulunamadı.");
+      return;
+    }
+    const rKey = p.unique_key || matId;
+    setResearchingKey(rKey);
+    try {
+      const res = await fetch(`/api/materials/${encodeURIComponent(p.channel_id)}/${encodeURIComponent(matId)}/research?force=true`, {
+        method: "POST"
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        alert(`🔍 "${p.title}" için araştırma tamamlandı! (${data.verified_media_count}/${data.total_scenes} sahne doğrulandı)`);
+        await fetchData();
+      } else {
+        alert(`Araştırma hatası: ${data.detail || data.error || "Bilinmeyen hata"}`);
+      }
+    } catch (err) {
+      alert(`Hata: ${err.message}`);
+    } finally {
+      setResearchingKey(null);
+    }
+  };
 
   // Verileri çek
   const fetchData = useCallback(async () => {
@@ -210,6 +239,40 @@ export default function AutomationPage({ channels = [], groups = [], onNavigateS
       }
     } catch (err) {
       alert("Silme hatası: " + err.message);
+    }
+  };
+
+  const handleRegenerateServerVideo = async (video) => {
+    if (!video.can_regenerate) {
+      alert("Bu videonun üretim materyali sunucuda bulunamadığı için yeniden üretilemiyor.");
+      return;
+    }
+    if (!window.confirm(
+      `"${video.title || video.job_id}" videosu güncel üretim koduyla yeniden oluşturulsun mu? Eski dosya korunur; yeni video ayrı bir sunucu işi olarak eklenir ve otomatik yükleme yapılmaz.`
+    )) {
+      return;
+    }
+
+    setRegeneratingJobId(video.job_id);
+    try {
+      const response = await fetch("/api/automation/regenerate-server-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel_id: video.channel_id,
+          job_id: video.job_id,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.detail || data.message || "Yeniden üretim kuyruğa eklenemedi.");
+      }
+      alert(`Video yeniden üretim kuyruğuna eklendi.\nYeni iş ID: ${data.job_id}`);
+      await fetchData();
+    } catch (error) {
+      alert(`Yeniden üretim hatası: ${error.message}`);
+    } finally {
+      setRegeneratingJobId(null);
     }
   };
 
@@ -827,20 +890,39 @@ export default function AutomationPage({ channels = [], groups = [], onNavigateS
                             {downloadingJobId === matchedVideo.job_id ? "⏳ İndiriliyor..." : "📥 İndir"}
                           </button>
                         ) : (
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            disabled={dispatching || isQueued}
-                            onClick={() => handleDispatchQueue([p])}
-                            style={{
-                              fontSize: 12,
-                              padding: "4px 10px",
-                              borderRadius: 8,
-                              color: isQueued ? "#94a3b8" : "#38bdf8",
-                              background: isQueued ? "rgba(148, 163, 184, 0.1)" : "rgba(56, 189, 248, 0.1)"
-                            }}
-                          >
-                            {isQueued ? "⏳ Kuyrukta" : "☁️ Gönder"}
-                          </button>
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                            {p.material_id && (
+                              <button
+                                className="btn btn-ghost btn-sm"
+                                disabled={researchingKey === (p.unique_key || p.material_id)}
+                                onClick={() => handleResearchPlan(p)}
+                                style={{
+                                  fontSize: 12,
+                                  padding: "4px 8px",
+                                  borderRadius: 8,
+                                  color: "#38bdf8",
+                                  background: "rgba(56, 189, 248, 0.1)"
+                                }}
+                                title="Tarihi NTSB fotoğrafları, 1080p B-roll ve telemetri grafikleri araştırıp doğrular"
+                              >
+                                {researchingKey === (p.unique_key || p.material_id) ? "⏳..." : "🔍 Araştır"}
+                              </button>
+                            )}
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              disabled={dispatching || isQueued}
+                              onClick={() => handleDispatchQueue([p])}
+                              style={{
+                                fontSize: 12,
+                                padding: "4px 10px",
+                                borderRadius: 8,
+                                color: isQueued ? "#94a3b8" : "#38bdf8",
+                                background: isQueued ? "rgba(148, 163, 184, 0.1)" : "rgba(56, 189, 248, 0.1)"
+                              }}
+                            >
+                              {isQueued ? "⏳ Kuyrukta" : "☁️ Gönder"}
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -891,7 +973,7 @@ export default function AutomationPage({ channels = [], groups = [], onNavigateS
             </h2>
             <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--text-muted)" }}>
               Oracle Cloud sunucusunda üretilen videolar sunucuda saklanır. İstediğiniz zaman ilgili kanalın 'yuklenecek'
-              klasörüne tek tıkla indirebilirsiniz.
+              klasörüne indirebilir veya mevcut üretim materyali sunucuda duruyorsa güncel sistemle yalnızca o videoyu yeniden üretebilirsiniz.
             </p>
           </div>
 
@@ -930,6 +1012,7 @@ export default function AutomationPage({ channels = [], groups = [], onNavigateS
           >
             {serverVideos.map((v) => {
               const isDownloading = downloadingJobId === v.job_id;
+              const isRegenerating = regeneratingJobId === v.job_id;
 
               return (
                 <div
@@ -983,13 +1066,37 @@ export default function AutomationPage({ channels = [], groups = [], onNavigateS
                   <div
                     style={{
                       display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
+                      flexWrap: "wrap",
+                      alignItems: "stretch",
+                      justifyContent: "flex-end",
                       gap: 10,
                       paddingTop: 12,
                       borderTop: "1px solid rgba(255, 255, 255, 0.06)"
                     }}
                   >
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      disabled={!v.can_regenerate || Boolean(regeneratingJobId)}
+                      onClick={() => handleRegenerateServerVideo(v)}
+                      title={v.can_regenerate ? "Bu videoyu güncel üretim sistemiyle yeniden oluştur" : "Kaynak üretim materyali sunucuda bulunamadı"}
+                      style={{
+                        flex: 1,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6,
+                        padding: "8px 10px",
+                        borderRadius: 10,
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: v.can_regenerate ? "#60a5fa" : "#64748b",
+                        background: v.can_regenerate ? "rgba(59, 130, 246, 0.12)" : "rgba(100, 116, 139, 0.1)",
+                        cursor: v.can_regenerate && !regeneratingJobId ? "pointer" : "not-allowed"
+                      }}
+                    >
+                      {isRegenerating ? <RefreshCw size={13} className="spin" /> : <RotateCcw size={13} />}
+                      {isRegenerating ? "Kuyruğa ekleniyor…" : "Yeniden Üret"}
+                    </button>
                     <button
                       className="btn btn-primary btn-sm"
                       disabled={isDownloading}

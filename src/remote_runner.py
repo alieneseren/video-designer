@@ -261,12 +261,19 @@ class RemoteRunner:
         lang = (ch_config.get("language") or "auto").lower().strip()
         mat_dir = mat_folder if (mat_folder and mat_folder.exists()) else Path(tempfile.gettempdir())
 
+        # Kanalın seçtiği özel ses klonunu çözümle (yoksa aktif global klon)
+        channel_clone_id = (
+            ch_config.get("voice_clone_id")
+            or ch_config.get("edit_options", {}).get("voice_clone_id")
+            or (active_clone.get("id") if active_clone else None)
+        )
+
         # 1. WhatsApp Diyalog Mesajları
         messages = script_data.get("messages") or script_data.get("dialogue") or []
         if messages and isinstance(messages, list):
-            print(f"[RemoteRunner] 🎙️ WhatsApp için {len(messages)} mesaj melez ses profilleri ve yaş/persona modülasyonuyla sentezleniyor...")
+            print(f"[RemoteRunner] 🎙️ WhatsApp için {len(messages)} mesaj melez ses profilleri ve yaş/persona modülasyonuyla sentezleniyor (Kanal Klonu: {channel_clone_id})...")
             female_clone_id = "vc_ttsmaker_female_hybrid"
-            male_clone_id = active_clone.get("id") or "vc_ttsmaker_enes_hybrid"
+            male_clone_id = channel_clone_id or active_clone.get("id") or "vc_ttsmaker_enes_hybrid"
 
             for m_idx, msg in enumerate(messages):
                 txt = str(msg.get("text") or msg.get("content") or msg.get("message") or "").strip()
@@ -340,7 +347,7 @@ class RemoteRunner:
                     continue
                 speaker = str(sc.get("speaker") or sc.get("character") or sc.get("role") or "").lower()
                 is_sc_female = (sc.get("gender") == "female") or any(w in speaker for w in ["kadin", "kadın", "anne", "kız", "girl", "woman", "wife", "abla", "nine"])
-                target_cid = "vc_ttsmaker_female_hybrid" if is_sc_female else (active_clone.get("id") or "vc_ttsmaker_enes_hybrid")
+                target_cid = "vc_ttsmaker_female_hybrid" if is_sc_female else (channel_clone_id or active_clone.get("id") or "vc_ttsmaker_enes_hybrid")
 
                 out_wav = mat_dir / f"scene_{s_idx}_audio.wav"
                 ok = vc_mgr.synthesize_speech(
@@ -362,7 +369,7 @@ class RemoteRunner:
         if isinstance(full_text, list):
             full_text = " ".join(full_text)
         if full_text.strip():
-            print(f"[RemoteRunner] 🎙️ Genel anlatım Ali Enes klon sesiyle yerel M4'te sentezleniyor...")
+            print(f"[RemoteRunner] 🎙️ Genel anlatım kanal ses klonu ({channel_clone_id}) ile yerel M4'te sentezleniyor...")
             out_wav = mat_dir / "voiceover.wav"
             ok = vc_mgr.synthesize_speech(
                 text=full_text.strip(),
@@ -370,7 +377,7 @@ class RemoteRunner:
                 lang=lang,
                 pitch=0,
                 formant=1.0,
-                clone_id=active_clone.get("id")
+                clone_id=channel_clone_id
             )
             if ok and out_wav.exists() and out_wav.stat().st_size > 500:
                 b64 = base64.b64encode(out_wav.read_bytes()).decode("utf-8")
@@ -832,46 +839,62 @@ if os.path.exists(status_path):
         pass
 
 pattern = '{self.remote_dir}/output/{channel_id or '*'}'
-# SADECE nihai videoları (final_video.mp4 veya final.mp4) ara; ASLA scene_*.mp4 alma!
-candidate_files = glob.glob(pattern + '/*/final_video.mp4') + glob.glob(pattern + '/*/final.mp4')
-for p in candidate_files:
-    parts = p.split('/')
-    if len(parts) >= 4:
-        ch = parts[-3]
-        jid = parts[-2]
-        # Eğer bu iş şu anda aktif render ediliyorsa listeleme
-        if jid == current_active_job:
+# SADECE nihai videoları ara; her iş klasöründen yalnızca tek ve en güncel olanı al (final_video.mp4 öncelikli)
+seen_jobs = set()
+for jd in glob.glob(pattern + '/*'):
+    if not os.path.isdir(jd):
+        continue
+    parts = jd.split('/')
+    if len(parts) < 3:
+        continue
+    ch = parts[-2]
+    jid = parts[-1]
+    if (ch, jid) in seen_jobs or jid == current_active_job:
+        continue
+
+    p = None
+    for cand in ['final_video.mp4', 'final.mp4']:
+        cp = os.path.join(jd, cand)
+        if os.path.isfile(cp):
+            p = cp
+            break
+    if not p:
+        continue
+
+    try:
+        size_mb = round(os.path.getsize(p) / (1024*1024), 2)
+        if size_mb < 0.1:
             continue
+    except Exception:
+        continue
+
+    seen_jobs.add((ch, jid))
+    meta_path = os.path.join(jd, 'metadata.json')
+    video_info_path = os.path.join(jd, 'video_info.json')
+    meta = {{}}
+    if os.path.exists(meta_path):
         try:
-            size_mb = round(os.path.getsize(p) / (1024*1024), 2)
-            if size_mb < 0.1:
-                continue
+            meta = json.loads(open(meta_path, 'r', encoding='utf-8').read())
         except Exception:
-            continue
-        meta_path = os.path.join(os.path.dirname(p), 'metadata.json')
-        video_info_path = os.path.join(os.path.dirname(p), 'video_info.json')
-        meta = {{}}
-        if os.path.exists(meta_path):
-            try:
-                meta = json.loads(open(meta_path, 'r', encoding='utf-8').read())
-            except Exception:
-                pass
-        elif os.path.exists(video_info_path):
-            try:
-                meta = json.loads(open(video_info_path, 'r', encoding='utf-8').read())
-            except Exception:
-                pass
-        res.append({{
-            'channel_id': ch,
-            'job_id': jid,
-            'file_path': p,
-            'file_name': os.path.basename(p),
-            'size_mb': size_mb,
-            'title': meta.get('title') or f'{{ch}} - {{jid}}',
-            'created_at': meta.get('created_at'),
-            'duration': meta.get('duration', 45),
-            'row_id': str(meta.get('row_id') or meta.get('plan_id') or '')
-        }})
+            pass
+    elif os.path.exists(video_info_path):
+        try:
+            meta = json.loads(open(video_info_path, 'r', encoding='utf-8').read())
+        except Exception:
+            pass
+    source_job_path = os.path.join(base, 'jobs', jid + '.json')
+    res.append({{
+        'channel_id': ch,
+        'job_id': jid,
+        'file_path': p,
+        'file_name': os.path.basename(p),
+        'size_mb': size_mb,
+        'can_regenerate': os.path.isfile(source_job_path),
+        'title': meta.get('title') or f'{{ch}} - {{jid}}',
+        'created_at': meta.get('created_at'),
+        'duration': meta.get('duration', 45),
+        'row_id': str(meta.get('row_id') or meta.get('plan_id') or '')
+    }})
 print(json.dumps(res))
 " """
         rc, stdout, _ = self._run_ssh_cmd(py_cmd, timeout=12)
@@ -906,10 +929,107 @@ print(json.dumps(res))
                         "file_path": file_path,
                         "file_name": os.path.basename(file_path),
                         "size_mb": round(size_bytes / (1024 * 1024), 2),
+                        "can_regenerate": False,
                         "title": f"{ch} - {jid}",
                         "duration": 45
                     })
         return results
+
+    def regenerate_server_video(self, channel_id: str, job_id: str) -> Dict[str, Any]:
+        """Requeue one completed server video from its retained original job payload."""
+        for value, label in ((channel_id, "Kanal"), (job_id, "İş")):
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,159}", value or ""):
+                raise ValueError(f"{label} kimliği geçersiz.")
+
+        script = """
+import json, os, re, secrets, sys, time
+from pathlib import Path
+
+base = Path(sys.argv[1])
+channel_id, source_job_id = sys.argv[2:4]
+def fail(message, code=2):
+    print(json.dumps({"success": False, "message": message}, ensure_ascii=False))
+    raise SystemExit(code)
+
+video_dir = base / "output" / channel_id / source_job_id
+video_paths = [video_dir / "final_video.mp4", video_dir / "final.mp4"]
+if not any(path.is_file() and path.stat().st_size > 100_000 for path in video_paths):
+    fail("Sunucuda yeniden üretilebilecek hazır video bulunamadı.")
+
+source_payload_path = base / "jobs" / f"{source_job_id}.json"
+if not source_payload_path.is_file():
+    fail("Bu videonun üretim materyali sunucuda bulunamadı; yeniden üretim yapılamıyor.")
+try:
+    payload = json.loads(source_payload_path.read_text(encoding="utf-8"))
+except Exception as error:
+    fail(f"Kaynak üretim materyali okunamadı: {error}")
+if payload.get("channel_id") != channel_id or payload.get("job_id") != source_job_id:
+    fail("Kaynak üretim materyali seçilen video ile eşleşmiyor.")
+
+queue_dir = base / "queue"
+queue_dir.mkdir(parents=True, exist_ok=True)
+refresh_prefix = f"{source_job_id}_refresh_"
+for queued_path in queue_dir.glob("*.json"):
+    try:
+        queued_payload = json.loads(queued_path.read_text(encoding="utf-8"))
+    except Exception:
+        continue
+    if queued_payload.get("job_id", "").startswith(refresh_prefix):
+        fail("Bu video için yeniden üretim zaten kuyrukta.")
+jobs_dir = base / "jobs"
+for status_path in jobs_dir.glob(f"{source_job_id}_refresh_*_status.json"):
+    try:
+        status_data = json.loads(status_path.read_text(encoding="utf-8"))
+    except Exception:
+        continue
+    if status_data.get("status") in {"queued", "running", "rendering", "uploading"}:
+        fail("Bu video şu anda yeniden üretiliyor.")
+timestamp = time.strftime("%Y%m%d_%H%M%S", time.gmtime())
+new_job_id = f"{source_job_id}_refresh_{timestamp}_{secrets.token_hex(3)}"
+payload["job_id"] = new_job_id
+payload["regenerated_from_job_id"] = source_job_id
+payload["youtube_upload"] = False
+payload["created_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+staged_path = queue_dir / f".{new_job_id}.tmp"
+queue_path = queue_dir / f"{new_job_id}.json"
+try:
+    with staged_path.open("x", encoding="utf-8") as job_file:
+        json.dump(payload, job_file, ensure_ascii=False, indent=2)
+    os.replace(staged_path, queue_path)
+except Exception as error:
+    staged_path.unlink(missing_ok=True)
+    fail(f"Yeniden üretim kuyruğu hazırlanamadı: {error}")
+print(json.dumps({
+    "success": True,
+    "job_id": new_job_id,
+    "channel_id": channel_id,
+    "source_job_id": source_job_id
+}, ensure_ascii=False))
+"""
+        command = (
+            f"python3 -c {shlex.quote(script)} "
+            f"{shlex.quote(self.remote_dir)} {shlex.quote(channel_id)} {shlex.quote(job_id)}"
+        )
+        rc, stdout, stderr = self._run_ssh_cmd(command, timeout=30)
+        try:
+            result = json.loads(stdout.strip()) if stdout.strip() else {}
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"Sunucudan geçersiz yeniden üretim yanıtı alındı: {stdout.strip()}") from error
+        if rc != 0 or not result.get("success"):
+            message = result.get("message") or stderr.strip() or "Yeniden üretim kuyruğa eklenemedi."
+            raise RuntimeError(message)
+
+        start_rc, start_out, start_err = self._run_ssh_cmd(
+            f"bash {shlex.quote(self.remote_dir + '/start_queue.sh')}",
+            timeout=15,
+        )
+        if start_rc != 0:
+            raise RuntimeError(
+                "Video yeniden üretim kuyruğuna eklendi ancak sunucu kuyruğu başlatılamadı: "
+                f"{start_err.strip() or start_out.strip()}"
+            )
+        result["message"] = "Video güncel üretim koduyla yeniden üretilmek üzere kuyruğa eklendi."
+        return result
 
     def get_queue_status(self) -> Dict[str, Any]:
         """Sunucu sıralı görev kuyruğu durumunu (kalan iş, aktif çalışan, vb.) sorgular."""
@@ -947,18 +1067,76 @@ print(json.dumps(info))
                 pass
         return {"queue_count": 0, "jobs_count": 0, "is_running": False}
 
+    def delete_remote_job(self, job_id: str, channel_id: Optional[str] = None) -> bool:
+        """Sunucudaki işi, çıktılarını, kuyruk ve durum dosyalarını tamamen temizler."""
+        ch_filter = channel_id if channel_id and channel_id != "default" else "*"
+        del_cmd = f"""python3 -c "
+import os, glob, shutil
+base = '{self.remote_dir}'
+# 1. Output klasörünü sil
+for d in glob.glob(os.path.join(base, 'output', '{ch_filter}', '{job_id}*')):
+    shutil.rmtree(d, ignore_errors=True)
+# 2. Jobs ve Queue dosyalarını sil
+for f in glob.glob(os.path.join(base, 'jobs', '{job_id}*')):
+    try: os.remove(f)
+    except Exception: pass
+for f in glob.glob(os.path.join(base, 'queue', '{job_id}*')):
+    try: os.remove(f)
+    except Exception: pass
+for f in glob.glob(os.path.join(base, 'logs', '{job_id}*')):
+    try: os.remove(f)
+    except Exception: pass
+print('DELETED')
+" """
+        rc, out, _ = self._run_ssh_cmd(del_cmd, timeout=15)
+        return rc == 0
+
+    def is_job_downloaded_locally(self, channel_id: str, job_id: str, local_base_dir: Optional[str] = None) -> bool:
+        """Belirtilen job_id'ye ait geçerli bir videonun yerel diskte (kontrol, yuklenecek, yuklenen) zaten var olup olmadığını denetler."""
+        if not channel_id or not job_id:
+            return False
+        base = Path(local_base_dir) if local_base_dir else Path(__file__).resolve().parent.parent / "output"
+        ch_base = base / channel_id
+        if not ch_base.exists():
+            return False
+        for sub in ["kontrol", "yuklenecek", "yuklenen", ""]:
+            s_dir = ch_base / sub if sub else ch_base
+            if not s_dir.exists() or not s_dir.is_dir():
+                continue
+            for item in s_dir.iterdir():
+                if item.is_dir() and job_id in item.name:
+                    v1 = item / "final.mp4"
+                    v2 = item / "video.mp4"
+                    if (v1.exists() and v1.stat().st_size > 500000) or (v2.exists() and v2.stat().st_size > 500000):
+                        return True
+        return False
+
     def download_and_cleanup_job(
         self,
         channel_id: str,
         job_id: str,
         local_base_dir: Optional[str] = None,
-        delete_remote: bool = False
+        delete_remote: bool = False,
+        force: bool = False
     ) -> Dict[str, Any]:
         """
-        Sunucudan videoyu ve metadatasını indirip 'output/<channel_id>/yuklenecek/' klasörüne kaydeder,
+        Sunucudan videoyu ve metadatasını indirip 'output/<channel_id>/yuklenecek/' veya 'kontrol/' klasörüne kaydeder,
         ardından sunucudaki dosyaları temizler.
         """
-        # 0. Kanal Kalite Kontrol (AI QA) Ayarını Kontrol Et
+        # 0. Ön Denetim: Video yerelde zaten mevcut mu? (Mükerrer indirmeyi önle, force=True ise yeniden indir)
+        if not force and self.is_job_downloaded_locally(channel_id, job_id, local_base_dir):
+            print(f"[RemoteRunner] ℹ️ İş '{job_id}' ({channel_id}) yerelde zaten mevcut. Mükerrer indirme engellendi.")
+            if delete_remote:
+                self.delete_remote_job(job_id, channel_id)
+            return {
+                "success": True,
+                "job_id": job_id,
+                "channel_id": channel_id,
+                "already_existed": True,
+                "message": "Video yerelde zaten mevcut olduğundan mükerrer indirme atlandı."
+            }
+
+        # 0.1. Kanal Kalite Kontrol (AI QA) Ayarını Kontrol Et
         is_auto_qa = False
         try:
             from src.channel_manager import ChannelManager
@@ -975,183 +1153,207 @@ print(json.dumps(info))
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         base = Path(local_base_dir) if local_base_dir else Path(__file__).resolve().parent.parent / "output"
-        sub_folder = "kontrol" if is_auto_qa else "yuklenecek"
+        # Tüm sunucudan indirilen videolar öncelikle kalite kontrol için 'kontrol' klasörüne kaydedilir.
+        # Kullanıcı arayüzden 'Kontrolden Geçti' butonuna basınca 'yuklenecek' klasörüne aktarılır.
+        sub_folder = "kontrol"
         target_dir = base / channel_id / sub_folder / f"{timestamp}_{job_id}"
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        remote_job_dir = f"{self.remote_dir}/output/{channel_id}/{job_id}"
-        dest_video = target_dir / "final.mp4"
-
-        # 1. Video dosyasını indir
-        ok = self.download_final_video(job_id, channel_id, str(dest_video))
-        if not ok:
-            raise RuntimeError(f"Video sunucudan indirilemedi ({channel_id}/{job_id}).")
-
-        # 2. Metadata, altyazı ve video_info dosyalarını indir (BGM ve kanal bilgilerini içerir)
-        meta_data = {}
-        for meta_name in ["metadata.json", "video_info.json", "subtitles.srt", "youtube_chapters.txt"]:
-            remote_meta = f"{remote_job_dir}/{meta_name}"
-            dest_meta = target_dir / meta_name
-            scp_meta = [
-                "scp",
-                "-i", self.key_path,
-                "-o", "StrictHostKeyChecking=no",
-                f"{self.user}@{self.host}:{remote_meta}",
-                str(dest_meta)
-            ]
-            try:
-                subprocess.run(scp_meta, capture_output=True, timeout=15)
-                if meta_name == "metadata.json" and dest_meta.exists():
-                    meta_data = json.loads(dest_meta.read_text(encoding="utf-8"))
-            except Exception:
-                pass
-
-        # 2.5. Fon Müziğini (BGM) Çözümle
-        bgm_track_name = meta_data.get("bgm_track")
-        if not bgm_track_name:
-            if "reddit" in channel_id.lower() or "reddit" in str(meta_data.get("topic_category", "")).lower():
-                bgm_track_name = "reddit_official_bgm.mp3"
-            elif "wa" in channel_id.lower() or "chat" in channel_id.lower():
-                bgm_track_name = "monkeys_spinning.mp3"
-
-        bgm_volume = float(meta_data.get("bgm_volume", 0.18))
-        local_bgm_path = None
-        if bgm_track_name:
-            proj_root = Path(__file__).resolve().parent.parent
-            candidates_bgm = [
-                proj_root / "config" / "bgm" / bgm_track_name,
-                proj_root / "remotion" / "public" / "media" / bgm_track_name,
-            ]
-            for cb in candidates_bgm:
-                if cb.exists():
-                    local_bgm_path = cb
-                    break
-
-        # 3. Yerel RVC Ses Klonu & Filigran Giydirme (Apple Silicon M4)
-        clone_applied = False
-        clone_info = {}
         try:
-            from settings_manager import SettingsManager
-            settings = SettingsManager().get_all()
-            auto_clone = settings.get("auto_apply_voice_clone_on_download", True)
-        except Exception:
-            auto_clone = True
+            remote_job_dir = f"{self.remote_dir}/output/{channel_id}/{job_id}"
+            dest_video = target_dir / "final.mp4"
 
-        if auto_clone:
+            # 1. Video dosyasını indir
+            ok = self.download_final_video(job_id, channel_id, str(dest_video))
+            if not ok or not dest_video.exists() or dest_video.stat().st_size < 100000:
+                raise RuntimeError(f"Video sunucudan indirilemedi veya geçersiz boyutta ({channel_id}/{job_id}).")
+
+            # 2. Metadata, altyazı ve video_info dosyalarını indir (BGM ve kanal bilgilerini içerir)
+            meta_data = {}
+            for meta_name in ["metadata.json", "video_info.json", "subtitles.srt", "youtube_chapters.txt"]:
+                remote_meta = f"{remote_job_dir}/{meta_name}"
+                dest_meta = target_dir / meta_name
+                scp_meta = [
+                    "scp",
+                    "-i", self.key_path,
+                    "-o", "StrictHostKeyChecking=no",
+                    f"{self.user}@{self.host}:{remote_meta}",
+                    str(dest_meta)
+                ]
+                try:
+                    subprocess.run(scp_meta, capture_output=True, timeout=15)
+                    if meta_name == "metadata.json" and dest_meta.exists():
+                        meta_data = json.loads(dest_meta.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+
+            # 2.5. Fon Müziğini (BGM) Çözümle
+            bgm_track_name = meta_data.get("bgm_track")
+            if not bgm_track_name:
+                if "reddit" in channel_id.lower() or "reddit" in str(meta_data.get("topic_category", "")).lower():
+                    bgm_track_name = "reddit_official_bgm.mp3"
+                elif "wa" in channel_id.lower() or "chat" in channel_id.lower():
+                    bgm_track_name = "monkeys_spinning.mp3"
+
+            bgm_volume = float(meta_data.get("bgm_volume", 0.18))
+            local_bgm_path = None
+            if bgm_track_name:
+                proj_root = Path(__file__).resolve().parent.parent
+                candidates_bgm = [
+                    proj_root / "config" / "bgm" / bgm_track_name,
+                    proj_root / "remotion" / "public" / "media" / bgm_track_name,
+                ]
+                for cb in candidates_bgm:
+                    if cb.exists():
+                        local_bgm_path = cb
+                        break
+
+            # 3. Yerel RVC Ses Klonu & Filigran Giydirme (Apple Silicon M4)
+            clone_applied = False
+            clone_info = {}
             try:
-                from voice_clone_manager import VoiceCloneManager
-                print(f"[RemoteRunner] 🎙️ Yerel RVC ses modeli ve temiz fon müziği giydiriliyor: {dest_video.name}...")
-                clone_res = VoiceCloneManager().apply_voice_clone_to_video(
-                    dest_video,
-                    bgm_path=local_bgm_path,
-                    bgm_volume=bgm_volume
-                )
-                if clone_res.get("success"):
-                    clone_applied = True
-                    clone_info = clone_res
-                    print(f"[RemoteRunner] ✅ RVC ses ve fon müziği giydirme tamamlandı: {clone_res.get('clone_name')} ({clone_res.get('processing_time_sec')} sn)")
-                else:
-                    print(f"[RemoteRunner] ℹ️ RVC giydirme atlandı/başarısız ({clone_res.get('reason')}). Orijinal ses korunuyor.")
+                from settings_manager import SettingsManager
+                settings = SettingsManager().get_all()
+                auto_clone = settings.get("auto_apply_voice_clone_on_download", True)
+            except Exception:
+                auto_clone = True
+
+            if auto_clone:
+                try:
+                    from voice_clone_manager import VoiceCloneManager
+                    channel_voice_clone = (
+                        ch_cfg.get("voice_clone_id")
+                        or ch_cfg.get("edit_options", {}).get("voice_clone_id")
+                    ) if ch_cfg else None
+                    print(f"[RemoteRunner] 🎙️ Yerel RVC ses modeli ({channel_voice_clone or 'aktif/varsayılan'}) ve temiz fon müziği giydiriliyor: {dest_video.name}...")
+                    clone_res = VoiceCloneManager().apply_voice_clone_to_video(
+                        dest_video,
+                        clone_id=channel_voice_clone,
+                        bgm_path=local_bgm_path,
+                        bgm_volume=bgm_volume
+                    )
+                    if clone_res.get("success"):
+                        clone_applied = True
+                        clone_info = clone_res
+                        print(f"[RemoteRunner] ✅ RVC ses ve fon müziği giydirme tamamlandı: {clone_res.get('clone_name')} ({clone_res.get('processing_time_sec')} sn)")
+                    else:
+                        print(f"[RemoteRunner] ℹ️ RVC giydirme atlandı/başarısız ({clone_res.get('reason')}). Orijinal ses korunuyor.")
+                        if local_bgm_path:
+                            self._mix_bgm_into_video(dest_video, local_bgm_path, bgm_volume)
+                except Exception as vc_err:
+                    print(f"[RemoteRunner] ⚠️ RVC ses giydirme hatası (orijinal ses korunuyor): {vc_err}")
                     if local_bgm_path:
                         self._mix_bgm_into_video(dest_video, local_bgm_path, bgm_volume)
-            except Exception as vc_err:
-                print(f"[RemoteRunner] ⚠️ RVC ses giydirme hatası (orijinal ses korunuyor): {vc_err}")
+            else:
                 if local_bgm_path:
                     self._mix_bgm_into_video(dest_video, local_bgm_path, bgm_volume)
-        else:
-            if local_bgm_path:
-                self._mix_bgm_into_video(dest_video, local_bgm_path, bgm_volume)
 
-        # video.mp4 kopyası oluştur (YouTube Studio uploader uyumluluğu)
-        shutil.copy2(str(dest_video), str(target_dir / "video.mp4"))
+            # video.mp4 kopyası oluştur (YouTube Studio uploader uyumluluğu)
+            shutil.copy2(str(dest_video), str(target_dir / "video.mp4"))
 
-        # Eğer klon ses giydirildiyse metadata'yı güncelle
-        if clone_applied:
-            meta_path = target_dir / "metadata.json"
+            # Eğer klon ses giydirildiyse metadata'yı güncelle
+            if clone_applied:
+                meta_path = target_dir / "metadata.json"
+                try:
+                    meta_data = {}
+                    if meta_path.exists():
+                        meta_data = json.loads(meta_path.read_text(encoding="utf-8"))
+                    meta_data["voice_clone_applied"] = True
+                    meta_data["voice_clone_id"] = clone_info.get("clone_id")
+                    meta_data["voice_clone_name"] = clone_info.get("clone_name")
+                    meta_data["watermarked"] = clone_info.get("watermarked", True)
+                    meta_path.write_text(json.dumps(meta_data, ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception as meta_e:
+                    print(f"[RemoteRunner] Metadata klon ses güncelleme uyarısı: {meta_e}")
+
+            # 2.8. Otonom Yerel AI ile Viral Başlık, Açıklama ve Etiket Üretimi (Ayar/Aktifleştirme gerektirmez)
             try:
-                meta_data = {}
-                if meta_path.exists():
-                    meta_data = json.loads(meta_path.read_text(encoding="utf-8"))
-                meta_data["voice_clone_applied"] = True
-                meta_data["voice_clone_id"] = clone_info.get("clone_id")
-                meta_data["voice_clone_name"] = clone_info.get("clone_name")
-                meta_data["watermarked"] = clone_info.get("watermarked", True)
-                meta_path.write_text(json.dumps(meta_data, ensure_ascii=False, indent=2), encoding="utf-8")
-            except Exception as meta_e:
-                print(f"[RemoteRunner] Metadata klon ses güncelleme uyarısı: {meta_e}")
+                from ai_metadata_generator import auto_generate_and_apply_metadata
+                print(f"[RemoteRunner] 🤖 Yerel AI ile video SEO, başlık, açıklama ve etiketleri optimize ediliyor: {dest_video.name}...")
+                auto_generate_and_apply_metadata(target_dir, channel_id=channel_id)
+            except Exception as meta_ai_err:
+                print(f"[RemoteRunner] ⚠️ Otomatik AI metadata üretimi uyarısı: {meta_ai_err}")
 
-        # 2.8. Otonom Yerel AI ile Viral Başlık, Açıklama ve Etiket Üretimi (Ayar/Aktifleştirme gerektirmez)
+            # 3. Sunucudan videoyu kaldır & materyalleri 24 saat sakla (1 Gün Kuralı)
+            remote_cleaned = False
+            if delete_remote:
+                cleanup_cmd = f"""python3 -c "
+    import os, time, glob, shutil
+    job_dir = '{remote_job_dir}'
+    now = time.time()
+    if os.path.exists(job_dir):
+        # Ağır bitmiş video dosyalarını temizle (sunucu video listesinden anında düşsün)
+        for f in ['final_video.mp4', 'final.mp4', 'visual_track.mp4']:
+            fp = os.path.join(job_dir, f)
+            if os.path.exists(fp):
+                try: os.remove(fp)
+                except Exception: pass
+        # 24 saat saklama başlangıç zaman damgası bırak
+        ts_file = os.path.join(job_dir, 'downloaded_at.timestamp')
+        with open(ts_file, 'w') as f:
+            f.write(str(now))
+
+    # 24 saati (86400 saniye) geçmiş olan materyal klasörlerini tamamen süpür
+    base_out = '{self.remote_dir}/output'
+    for ts_path in glob.glob(os.path.join(base_out, '*', '*', 'downloaded_at.timestamp')):
         try:
-            from ai_metadata_generator import auto_generate_and_apply_metadata
-            print(f"[RemoteRunner] 🤖 Yerel AI ile video SEO, başlık, açıklama ve etiketleri optimize ediliyor: {dest_video.name}...")
-            auto_generate_and_apply_metadata(target_dir, channel_id=channel_id)
-        except Exception as meta_ai_err:
-            print(f"[RemoteRunner] ⚠️ Otomatik AI metadata üretimi uyarısı: {meta_ai_err}")
+            with open(ts_path) as tf:
+                dl_time = float(tf.read().strip())
+            if now - dl_time > 86400:
+                d_to_remove = os.path.dirname(ts_path)
+                shutil.rmtree(d_to_remove, ignore_errors=True)
+                j_name = os.path.basename(d_to_remove)
+                for jf in glob.glob(f'{self.remote_dir}/jobs/{{j_name}}*'):
+                    try: os.remove(jf)
+                    except Exception: pass
+                for lf in glob.glob(f'{self.remote_dir}/logs/{{j_name}}*'):
+                    try: os.remove(lf)
+                    except Exception: pass
+        except Exception:
+            pass
+    " """
+                rc, _, _ = self._run_ssh_cmd(cleanup_cmd, timeout=15)
+                remote_cleaned = (rc == 0)
+                print(f"[RemoteRunner] 🧹 Video sunucu listesinden düşürüldü, materyaller 24 saat saklanacak: {channel_id}/{job_id}")
 
-        # 3. Sunucudan videoyu kaldır & materyalleri 24 saat sakla (1 Gün Kuralı)
-        remote_cleaned = False
-        if delete_remote:
-            cleanup_cmd = f"""python3 -c "
-import os, time, glob, shutil
-job_dir = '{remote_job_dir}'
-now = time.time()
-if os.path.exists(job_dir):
-    # Ağır bitmiş video dosyalarını temizle (sunucu video listesinden anında düşsün)
-    for f in ['final_video.mp4', 'final.mp4', 'visual_track.mp4']:
-        fp = os.path.join(job_dir, f)
-        if os.path.exists(fp):
-            try: os.remove(fp)
-            except Exception: pass
-    # 24 saat saklama başlangıç zaman damgası bırak
-    ts_file = os.path.join(job_dir, 'downloaded_at.timestamp')
-    with open(ts_file, 'w') as f:
-        f.write(str(now))
-
-# 24 saati (86400 saniye) geçmiş olan materyal klasörlerini tamamen süpür
-base_out = '{self.remote_dir}/output'
-for ts_path in glob.glob(os.path.join(base_out, '*', '*', 'downloaded_at.timestamp')):
-    try:
-        with open(ts_path) as tf:
-            dl_time = float(tf.read().strip())
-        if now - dl_time > 86400:
-            d_to_remove = os.path.dirname(ts_path)
-            shutil.rmtree(d_to_remove, ignore_errors=True)
-            j_name = os.path.basename(d_to_remove)
-            for jf in glob.glob(f'{self.remote_dir}/jobs/{{j_name}}*'):
-                try: os.remove(jf)
-                except Exception: pass
-            for lf in glob.glob(f'{self.remote_dir}/logs/{{j_name}}*'):
-                try: os.remove(lf)
-                except Exception: pass
-    except Exception:
-        pass
-" """
-            rc, _, _ = self._run_ssh_cmd(cleanup_cmd, timeout=15)
-            remote_cleaned = (rc == 0)
-            print(f"[RemoteRunner] 🧹 Video sunucu listesinden düşürüldü, materyaller 24 saat saklanacak: {channel_id}/{job_id}")
-
-        return {
-            "success": True,
-            "channel_id": channel_id,
-            "job_id": job_id,
-            "local_dir": str(target_dir),
-            "video_path": str(dest_video),
-            "size_mb": round(dest_video.stat().st_size / (1024 * 1024), 2),
-            "remote_cleaned": remote_cleaned,
-            "voice_clone_applied": clone_applied,
-            "voice_clone_info": clone_info
-        }
+            return {
+                "success": True,
+                "channel_id": channel_id,
+                "job_id": job_id,
+                "local_dir": str(target_dir),
+                "video_path": str(dest_video),
+                "size_mb": round(dest_video.stat().st_size / (1024 * 1024), 2),
+                "remote_cleaned": remote_cleaned,
+                "voice_clone_applied": clone_applied,
+                "voice_clone_info": clone_info
+            }
+        except Exception as e:
+            # HATA DURUMUNDA: Asla diskte boş veya bozuk klasör bırakma!
+            if target_dir.exists():
+                try:
+                    shutil.rmtree(str(target_dir), ignore_errors=True)
+                    print(f"[RemoteRunner] 🧹 Başarısız indirme sonrası boş klasör silindi: {target_dir.name}")
+                except Exception:
+                    pass
+            raise e
 
     def download_all_pending_for_channel(self, channel_id: str) -> list[Dict[str, Any]]:
         """Kanal için sunucudaki tüm hazır videoları indirir ve sunucudan siler."""
         videos = self.list_server_videos(channel_id)
         downloaded = []
         for v in videos:
+            jid = v.get("job_id")
+            if not jid:
+                continue
+            if self.is_job_downloaded_locally(channel_id, jid):
+                print(f"[RemoteRunner] ℹ️ '{jid}' ({channel_id}) yerelde zaten mevcut, mükerrer indirme atlandı.")
+                self.delete_remote_job(jid, channel_id)
+                continue
             try:
-                res = self.download_and_cleanup_job(channel_id, v["job_id"], delete_remote=True)
+                res = self.download_and_cleanup_job(channel_id, jid, delete_remote=True)
                 downloaded.append(res)
             except Exception as e:
-                print(f"[RemoteRunner] İndirme hatası ({v['job_id']}): {e}")
+                print(f"[RemoteRunner] İndirme hatası ({jid}): {e}")
         return downloaded
 
     def download_all_pending(self, channel_id: Optional[str] = None) -> list[Dict[str, Any]]:
@@ -1159,11 +1361,19 @@ for ts_path in glob.glob(os.path.join(base_out, '*', '*', 'downloaded_at.timesta
         videos = self.list_server_videos(channel_id)
         downloaded = []
         for v in videos:
+            ch = v.get("channel_id")
+            jid = v.get("job_id")
+            if not ch or not jid:
+                continue
+            if self.is_job_downloaded_locally(ch, jid):
+                print(f"[RemoteRunner] ℹ️ '{jid}' ({ch}) yerelde zaten mevcut, mükerrer indirme atlandı.")
+                self.delete_remote_job(jid, ch)
+                continue
             try:
-                res = self.download_and_cleanup_job(v["channel_id"], v["job_id"], delete_remote=True)
+                res = self.download_and_cleanup_job(ch, jid, delete_remote=True)
                 downloaded.append(res)
             except Exception as e:
-                print(f"[RemoteRunner] İndirme hatası ({v['channel_id']}/{v['job_id']}): {e}")
+                print(f"[RemoteRunner] İndirme hatası ({ch}/{jid}): {e}")
         return downloaded
 
     def _mix_bgm_into_video(self, video_path: Path, bgm_path: Path, bgm_volume: float = 0.06) -> bool:

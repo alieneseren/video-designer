@@ -5,14 +5,17 @@ import os
 import re
 import json
 import shutil
+import subprocess
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import unquote
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from channel_manager import ChannelManager, get_localized_metadata, is_bogus_fallback
 from settings_manager import SettingsManager
 from models.video import EditVideoPayload
+from retention_manager import tag_archived_folder, clean_expired_yuklenen_folders, get_folder_retention_info
 
 router = APIRouter(tags=["Outputs"])
 settings_mgr = SettingsManager()
@@ -317,7 +320,8 @@ def list_output_videos():
     if not out_path.exists():
         return []
 
-    mgr = ChannelManager()
+    cfg_file = Path(__file__).resolve().parent.parent.parent / "config" / "channels.json"
+    mgr = ChannelManager(str(cfg_file) if cfg_file.exists() else "config/channels.json")
     channels = mgr.all_channels()
     channel_map = {ch["channel_id"]: ch.get("name", ch["channel_id"]) for ch in channels}
     channel_obj_map = {ch["channel_id"]: ch for ch in channels}
@@ -447,10 +451,12 @@ def archive_video(folder_name: str):
             shutil.rmtree(dest_folder)
             
         folder.rename(dest_folder)
+        tag_archived_folder(dest_folder, retention_days=20)
         new_folder_name = f"{channel_id}/yuklenen/{folder_basename}"
         return {"success": True, "folder": new_folder_name, "archived": True}
     else:
         (folder / ".archived").touch()
+        tag_archived_folder(folder, retention_days=20)
         return {"success": True, "folder": folder_name, "archived": True}
 
 
@@ -569,6 +575,7 @@ def update_upload_status(folder_name: str, payload: dict):
             
         try:
             parent_folder.rename(dest_folder)
+            tag_archived_folder(dest_folder, retention_days=20)
             print(f"[STATUS] Incident group archived successfully: {parent_folder.name}")
             if len(parts) >= 4:
                 new_folder_name = f"{channel_id}/yuklenen/{folder_basename}/{parts[3]}"
@@ -705,3 +712,297 @@ def edit_output_video(payload: EditVideoPayload):
         "video_path": video_path,
         "transition": transition,
     }
+
+
+# ─────────────────────────────────────────────────────────────
+# KONTROLDEKI VİDEOLAR MODÜLÜ (Approval & Review Hub)
+# ─────────────────────────────────────────────────────────────
+
+class KontrolApprovePayload(BaseModel):
+    channel_id: str
+    folder_name: str
+
+class KontrolApproveAllPayload(BaseModel):
+    channel_id: str
+
+class KontrolOpenFolderPayload(BaseModel):
+    folder_path: str
+
+
+def _get_output_path() -> Path:
+    """Proje kök dizinindeki output klasörünü güvenilir şekilde döner."""
+    base = Path(__file__).resolve().parent.parent.parent
+    cfg = settings_mgr.get("output_dir", "output")
+    p = Path(cfg)
+    if p.is_absolute() and p.exists():
+        return p
+    if (base / cfg).exists():
+        return (base / cfg).resolve()
+    return (base / "output").resolve()
+
+
+@router.get("/api/kontrol/videos")
+def get_kontrol_videos():
+    """Tüm kanallardaki 'kontrol/' klasöründe bulunan videoları kanal bazında kategorize edip döndürür."""
+    output_dir = _get_output_path()
+    if not output_dir.exists():
+        return {"success": True, "channels": [], "total_videos": 0, "total_channels": 0}
+
+    cfg_file = Path(__file__).resolve().parent.parent.parent / "config" / "channels.json"
+    mgr = ChannelManager(str(cfg_file) if cfg_file.exists() else "config/channels.json")
+    channels_cfg = mgr.all_channels()
+    channel_map = {ch["channel_id"]: ch for ch in channels_cfg}
+
+    categorized_channels = []
+    total_videos = 0
+
+    for ch_dir in sorted(output_dir.iterdir(), key=lambda p: p.name.lower()):
+        if not ch_dir.is_dir() or ch_dir.name.startswith("."):
+            continue
+        kontrol_dir = ch_dir / "kontrol"
+        if not kontrol_dir.exists() or not kontrol_dir.is_dir():
+            continue
+
+        ch_id = ch_dir.name
+        ch_cfg = channel_map.get(ch_id, {})
+        ch_name = ch_cfg.get("name") or ch_id
+        topic_cat = ch_cfg.get("topic_category") or "general"
+        lang = ch_cfg.get("language") or "tr"
+
+        videos = []
+        for folder in sorted(kontrol_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+            if not folder.is_dir() or folder.name.startswith("."):
+                continue
+
+            v_file = folder / "final.mp4"
+            if not v_file.exists():
+                v_file = folder / "video.mp4"
+            if not v_file.exists():
+                continue
+
+            meta = _parse_metadata(folder)
+            extra = {}
+            for info_name in ["video_info.json", "metadata.json"]:
+                ip = folder / info_name
+                if ip.exists():
+                    try:
+                        extra = json.loads(ip.read_text(encoding="utf-8"))
+                        break
+                    except Exception:
+                        pass
+
+            title = meta.get("title") or extra.get("title") or folder.name
+            desc = meta.get("description") or extra.get("description") or ""
+            tags = meta.get("tags") or extra.get("tags") or []
+            dur = extra.get("duration") or extra.get("duration_sec") or 0.0
+
+            if dur <= 0.0:
+                try:
+                    cmd_dur = [
+                        "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                        "-of", "default=noprint_wrappers=1:nokey=1", str(v_file)
+                    ]
+                    r = subprocess.run(cmd_dur, capture_output=True, text=True, timeout=5)
+                    if r.returncode == 0 and r.stdout.strip():
+                        dur = round(float(r.stdout.strip()), 1)
+                except Exception:
+                    pass
+
+            size_mb = round(v_file.stat().st_size / (1024 * 1024), 2)
+
+            # Thumbnail keşfi
+            thumb_url = None
+            for thumb_name in ["final_thumbnail.jpg", "thumbnail.jpg", "thumbnail.png", "scene_0.jpg"]:
+                tp = folder / thumb_name
+                if tp.exists():
+                    thumb_url = f"/output/{ch_id}/kontrol/{folder.name}/{thumb_name}"
+                    break
+
+            created_at = meta.get("created_at") or extra.get("created_at")
+            if not created_at:
+                try:
+                    created_at = datetime.fromtimestamp(folder.stat().st_mtime).isoformat()
+                except Exception:
+                    created_at = ""
+
+            video_url = f"/output/{ch_id}/kontrol/{folder.name}/{v_file.name}"
+
+            videos.append({
+                "folder_name": folder.name,
+                "folder_path": str(folder),
+                "video_file": str(v_file),
+                "video_url": video_url,
+                "thumbnail_url": thumb_url,
+                "title": title,
+                "description": desc,
+                "tags": tags,
+                "duration": dur,
+                "size_mb": size_mb,
+                "created_at": created_at,
+                "channel_id": ch_id,
+                "channel_name": ch_name,
+                "is_shorts": extra.get("shorts_mode", True) or ("shorts" in folder.name.lower()),
+                "voice_clone_name": extra.get("voice_clone_name")
+            })
+
+        if videos:
+            total_videos += len(videos)
+            categorized_channels.append({
+                "channel_id": ch_id,
+                "channel_name": ch_name,
+                "topic_category": topic_cat,
+                "language": lang,
+                "video_count": len(videos),
+                "videos": videos
+            })
+
+    return {
+        "success": True,
+        "channels": categorized_channels,
+        "total_videos": total_videos,
+        "total_channels": len(categorized_channels)
+    }
+
+
+@router.post("/api/kontrol/approve")
+def approve_kontrol_video(payload: KontrolApprovePayload):
+    """Videoyu 'kontrol/' klasöründen 'yuklenecek/' klasörüne taşır ve yayın kuyruğuna aktarır."""
+    output_dir = _get_output_path()
+    src_folder = (output_dir / payload.channel_id / "kontrol" / payload.folder_name).resolve()
+
+    if not src_folder.exists() or not src_folder.is_dir():
+        raise HTTPException(status_code=404, detail=f"Kontrol klasörü bulunamadı: {payload.folder_name}")
+
+    yuklenecek_dir = output_dir / payload.channel_id / "yuklenecek"
+    yuklenecek_dir.mkdir(parents=True, exist_ok=True)
+
+    dest_folder = yuklenecek_dir / payload.folder_name
+    if dest_folder.exists():
+        backup_name = f"{dest_folder.name}_replaced_{int(datetime.now().timestamp())}"
+        shutil.move(str(dest_folder), str(yuklenecek_dir / backup_name))
+
+    # Onay metadatası kaydet
+    approval_info = {
+        "status": "APPROVED",
+        "approved_at": datetime.now().isoformat(),
+        "from_folder": str(src_folder),
+        "target_folder": str(dest_folder)
+    }
+    try:
+        (src_folder / "approval.json").write_text(json.dumps(approval_info, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+    # Taşıma işlemi
+    shutil.move(str(src_folder), str(dest_folder))
+
+    # Yükleme durumunu sıfırla (eklenti tarafından derhal algılanması için)
+    try:
+        vinfo_path = dest_folder / "video_info.json"
+        if vinfo_path.exists():
+            vdata = json.loads(vinfo_path.read_text(encoding="utf-8"))
+            vdata["uploaded_youtube"] = False
+            vdata["uploaded_instagram"] = False
+            vdata["uploaded_tiktok"] = False
+            vdata["video_path"] = str(dest_folder / "final.mp4")
+            vinfo_path.write_text(json.dumps(vdata, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+    # İlgili materyalleri eşitle (varsa)
+    try:
+        from material_status_sync import sync_materials_with_generated_videos
+        from materials_manager import ProductionMaterialsManager
+        mat_mgr = ProductionMaterialsManager()
+        ch_mats = mat_mgr.load_materials(payload.channel_id)
+        if ch_mats:
+            sync_materials_with_generated_videos(mat_mgr, ch_mats)
+            mat_mgr.save_materials(payload.channel_id, ch_mats)
+    except Exception as e:
+        print(f"[KONTROL-APPROVE] Materyal senkronizasyon uyarısı: {e}")
+
+    return {
+        "success": True,
+        "message": f"'{payload.folder_name}' başarıyla 'yuklenecek' klasörüne aktarıldı.",
+        "channel_id": payload.channel_id,
+        "destination": str(dest_folder)
+    }
+
+
+@router.post("/api/kontrol/approve-all")
+def approve_all_kontrol_videos(payload: KontrolApproveAllPayload):
+    """Bir kanala ait kontrol klasöründeki tüm videoları topluca 'yuklenecek/' klasörüne taşır."""
+    output_dir = _get_output_path()
+    kontrol_dir = (output_dir / payload.channel_id / "kontrol").resolve()
+
+    if not kontrol_dir.exists() or not kontrol_dir.is_dir():
+        raise HTTPException(status_code=404, detail="Kontrol klasörü bulunamadı.")
+
+    yuklenecek_dir = output_dir / payload.channel_id / "yuklenecek"
+    yuklenecek_dir.mkdir(parents=True, exist_ok=True)
+
+    moved_count = 0
+    for folder in list(kontrol_dir.iterdir()):
+        if not folder.is_dir() or folder.name.startswith("."):
+            continue
+        v_file = folder / "final.mp4"
+        if not v_file.exists():
+            v_file = folder / "video.mp4"
+        if not v_file.exists():
+            continue
+
+        dest_folder = yuklenecek_dir / folder.name
+        if dest_folder.exists():
+            backup_name = f"{dest_folder.name}_replaced_{int(datetime.now().timestamp())}"
+            shutil.move(str(dest_folder), str(yuklenecek_dir / backup_name))
+
+        shutil.move(str(folder), str(dest_folder))
+        moved_count += 1
+
+    return {
+        "success": True,
+        "message": f"{payload.channel_id} kanalından {moved_count} video 'yuklenecek' klasörüne aktarıldı.",
+        "moved_count": moved_count
+    }
+
+
+@router.post("/api/kontrol/open-folder")
+def open_kontrol_folder(payload: KontrolOpenFolderPayload):
+    """Klasörü yerel dosya yöneticisinde (Finder) açar."""
+    p = Path(payload.folder_path).resolve()
+    if p.exists():
+        subprocess.run(["open", str(p)])
+        return {"success": True}
+    raise HTTPException(status_code=404, detail="Klasör bulunamadı")
+
+
+@router.post("/api/retention/clean")
+def trigger_retention_clean(retention_days: int = 20):
+    """20 günlük saklama süresi dolmuş tüm yüklenen video klasörlerini temizler."""
+    res = clean_expired_yuklenen_folders(retention_days=retention_days)
+    return res
+
+
+@router.get("/api/retention/status")
+def get_retention_status():
+    """Tüm kanalların yüklenen klasöründeki saklama sürelerini ve durumlarını listeler."""
+    output_dir = _get_output_path()
+    items = []
+    if output_dir.exists():
+        for ch in output_dir.iterdir():
+            if not ch.is_dir():
+                continue
+            yk = ch / "yuklenen"
+            if yk.exists() and yk.is_dir():
+                for d in yk.iterdir():
+                    if d.is_dir() and not d.name.startswith("."):
+                        info = get_folder_retention_info(d, default_days=20)
+                        info["channel_id"] = ch.name
+                        items.append(info)
+    return {
+        "success": True,
+        "policy": "20 Günlük Saklama Politikası (TTL = 20 gün)",
+        "total_folders": len(items),
+        "folders": items
+    }
+

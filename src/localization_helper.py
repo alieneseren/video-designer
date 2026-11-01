@@ -62,7 +62,7 @@ def detect_language(text: str) -> str:
     return det if det and det != "unknown" else "tr"
 
 
-def ensure_localized_script(script_data: Dict[str, Any], target_lang: str) -> Dict[str, Any]:
+def ensure_localized_script(script_data: Dict[str, Any], target_lang: str, channel_id: Optional[str] = None, **kwargs) -> Dict[str, Any]:
     """
     Verilen senaryoyu hedef kanala (target_lang) göre yerelleştirir.
     - Eğer senaryo zaten çok dilli bir harita ise (ör: {"tr": {...}, "en": {...}}), hedef dili döndürür.
@@ -84,7 +84,7 @@ def ensure_localized_script(script_data: Dict[str, Any], target_lang: str) -> Di
         res["language"] = target_lang
         return res
 
-    # 2. Tek dilli senaryo: Mevcut dili kontrol et
+    # 2. Tek dilli veya karışık sahneli senaryo çözümlemesi
     candidate = copy.deepcopy(script_data)
 
     # Eğer tek dilli ama dil anahtarları varsa (örneğin sadece 'tr' var ama 'en' isteniyor)
@@ -92,6 +92,27 @@ def ensure_localized_script(script_data: Dict[str, Any], target_lang: str) -> Di
         if lk in candidate and isinstance(candidate[lk], dict) and ("scenes" in candidate[lk] or "messages" in candidate[lk] or "narration" in candidate[lk]):
             candidate = copy.deepcopy(candidate[lk])
             break
+
+    # 2.1 Sahnelerde çok dilli / ardışık dilli blok kontrolü (ör: 7 İngilizce + 7 Türkçe sahne)
+    raw_scenes = candidate.get("scenes")
+    scenes_key = "scenes"
+    if not raw_scenes and isinstance(candidate.get("scripts"), list):
+        raw_scenes = candidate["scripts"]
+        scenes_key = "scripts"
+
+    if raw_scenes and isinstance(raw_scenes, list) and len(raw_scenes) > 0:
+        matching_scenes = [
+            s for s in raw_scenes
+            if isinstance(s, dict) and detect_language(s.get("narration") or s.get("text") or "") == target_lang
+        ]
+        # Eğer sahneler içinde hedef dile tam uyan bir grup varsa (ör: 14 sahnenin 7'si hedef dildeyse)
+        if len(matching_scenes) >= 3 and len(matching_scenes) < len(raw_scenes):
+            print(f"[Localization] 🎯 Karışık sahnelerden '{target_lang}' diline ait {len(matching_scenes)} sahne başarıyla ayrıştırıldı.")
+            for idx, s in enumerate(matching_scenes):
+                s["scene_id"] = idx + 1
+            candidate[scenes_key] = matching_scenes
+            if scenes_key == "scripts":
+                candidate["scenes"] = matching_scenes
 
     # Örnek metin üzerinden dil tespiti yap
     sample_text = (
@@ -109,8 +130,14 @@ def ensure_localized_script(script_data: Dict[str, Any], target_lang: str) -> Di
     actual_detected = detect_language(sample_text) if sample_text else None
     detected_src = actual_detected or candidate.get("language") or "tr"
 
-    # Hedef dil ile aynıysa doğrudan döndür
-    if detected_src and detected_src.lower().strip() == target_lang:
+    # Eğer ana metin dili hedef dil ile aynıysa ve sahneler de hedef dildeyse döndür
+    scenes_clean = True
+    if candidate.get("scenes") and isinstance(candidate["scenes"], list) and len(candidate["scenes"]) > 0:
+        first_sc_lang = detect_language(candidate["scenes"][0].get("narration") or candidate["scenes"][0].get("text") or "")
+        if first_sc_lang != target_lang:
+            scenes_clean = False
+
+    if detected_src and detected_src.lower().strip() == target_lang and scenes_clean:
         candidate["language"] = target_lang
         return candidate
 

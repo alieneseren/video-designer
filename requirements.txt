@@ -10,3 +10,5 @@ fastapi>=0.100.0
 uvicorn>=0.22.0
 watchfiles>=1.0.0
 cryptography>=41.0.0
+torch>=2.2.0
+transformers>=4.40.0

@@ -396,6 +396,22 @@ Formatting & JSON Output:
 Output strictly valid JSON matching the requested scene structure with "narration", "active_character", "character_dialogue", "visual_type", and "image_prompt".
 """
 
+BASKETBALL_SYSTEM_PROMPT = """You are an elite NBA sports analyst, basketball storytelling producer, and scriptwriter for "The Basketball Show".
+You create high-octane, gripping, and deeply researched 35-45 second basketball Shorts (in the high-viewership style of JxmyHighroller, Secret Base, and Kenny Beecham).
+
+Narrative Structure & Pacing:
+1. THE RETENTION HOOK (0-4s): State a bizarre fact, counter-intuitive stat, or high-stakes drama. (e.g. "Steph Curry isn't the greatest shooter ever... according to this one secret stat." or "In 1993, Michael Jordan did something so disrespectful the NBA had to investigate.")
+2. THE BREAKDOWN (5-25s): Deconstruct the mechanics, physics, tactical play, or psychological mind games with concrete numbers and intense storytelling.
+3. THE TWIST / CLIMAX (26-36s): Reveal what actually happened behind closed doors or why the league had to change its rules.
+4. ENGAGEMENT OUTRO (37-42s): Pose a sharp debate question to ignite the comment section. (e.g. "Is Curry better at 35 than prime Jordan? Tell me your pick.")
+
+Guidelines:
+- Tone: High energy, authoritative, dramatic, fast-paced sports commentary.
+- Audio cues: Suggest sound effects in parentheses like (swish sound), (buzzer), (sneaker squeak), (crowd erupts).
+- Word count: Strictly between 85 to 115 words so it can be voiced cleanly in 35-42 seconds without rushing.
+- JSON output with fields: title, script, visual_scenes, keywords, hook_summary, debate_question.
+"""
+
 
 def get_system_prompt(category: str, language: str = "tr") -> str:
     cat = category.lower().strip()
@@ -406,6 +422,8 @@ def get_system_prompt(category: str, language: str = "tr") -> str:
         return TRAVEL_SYSTEM_PROMPT
     elif cat == "aviation":
         return AVIATION_SYSTEM_PROMPT
+    elif cat in ("basketball_analysis", "basketball", "sports", "nba", "thebasketballshows"):
+        return BASKETBALL_SYSTEM_PROMPT
     elif cat in ("crayon_combat", "military", "military_tech"):
         try:
             from crayon_combat_engine import CRAYON_COMBAT_SYSTEM_PROMPT
@@ -518,16 +536,16 @@ TOPIC_SUGGESTIONS = {
         "Pinnacle Airlines Flight 3701 — Engine Flameout at Cruise Altitude"
     ],
     "crayon_combat": [
-        "F-35 Lightning II — The $1.7 Trillion Flying iPhone",
-        "A-10 Warthog — The Jet Built AROUND a 30mm Gatling Gun",
-        "B-2 Spirit — The $2 Billion Stealth Bomber That Melts in Rain",
-        "Su-57 Felon — The Stealth Jet Held Together by Wood Screws",
-        "SR-71 Blackbird — The Mach 3 Spy Plane That Leaked Fuel on Purpose",
-        "F-22 Raptor — The Undefeated King That Never Fought an Enemy Jet",
-        "M1 Abrams Tank — The 70-Ton Beast Powered by a Jet Engine",
-        "Zumwalt-Class Destroyer — The $4 Billion Warship With No Ammo",
-        "Eurofighter Typhoon — Built by 4 Countries Who Couldn't Agree on Anything",
-        "B-21 Raider — America's New Secret Flying Wing"
+        "F-35 Lightning II — Design trade-offs in a multi-role aircraft program",
+        "A-10 Thunderbolt II — How the aircraft was designed around its cannon",
+        "B-2 Spirit — Engineering trade-offs in low-observable aircraft design",
+        "SR-71 Blackbird — Thermal engineering at sustained high speed",
+        "F-22 Raptor — The engineering priorities behind air-superiority design",
+        "M1 Abrams — The trade-offs behind its powerplant and logistics",
+        "Zumwalt-class destroyer — How requirements shaped the ship's design",
+        "Eurofighter Typhoon — The engineering challenges of a multinational program",
+        "B-21 Raider — What public sources reveal about its design goals",
+        "Military flight testing — How engineers document design changes"
     ],
     "tech_finance_essay": [
         "The First Big Victim of the AI Bubble",
@@ -548,6 +566,23 @@ TOPIC_SUGGESTIONS = {
         "Are Black Holes Just the Universe's Way of Zipping Compressed Data?",
         "What If All Oceans Turned Into Fresh Water Overnight?",
         "What If Earth Stopped Spinning for Just 5 Seconds?"
+    ],
+    "basketball_analysis": [
+        "The Real Reason Shaq Couldn't Shoot Free Throws",
+        "Why Nobody Could Block Kareem's Skyhook",
+        "Steph Curry: Better Than Ever at 35?",
+        "The Unbelievable Mind Games Michael Jordan Played",
+        "The Forgotten NBA Rule That Changed the Game Forever",
+        "LeBron James: The Secret Behind His 21-Year Longevity",
+        "The Craziest Triple-Double Record in Basketball History",
+        "Why Wilt Chamberlain's 100-Point Game Will Never Be Beaten",
+        "The Dark Secret Behind the NBA's Shortest Dunk Champion",
+        "How Dennis Rodman Predicted Every Rebound Before It Happened",
+        "The Night Kobe Bryant Scored 81 Points (Untold Truth)",
+        "Why Tim Duncan's Bank Shot Was Impossible to Defend",
+        "The 0.4 Second Shot That Broke the San Antonio Spurs",
+        "Allen Iverson's Crossover That Shook Michael Jordan",
+        "The NBA Game Where Both Teams Tried to Lose on Purpose"
     ],
     "reddit_stories": [
         "22 Yaşımda Ailemin 15 Yıllık Organize Kaçakçılık Çetesini Öğrendim (AITAH?)",
@@ -693,15 +728,17 @@ def _build_prompt(channel_config: dict, planned_topic: str = None) -> str:
     elif is_reddit_cat and not shorts_mode:
         duration = min(max(duration, 120.0), 180.0) # Uzun Reddit videoları 120s - 180s arasında (2-3dk)
     elif category in ("crayon_combat", "military", "military_tech") and not shorts_mode:
-        duration = min(max(duration, 360.0), 480.0)
+        duration = min(max(duration, 600.0), 840.0)
     elif category in ("tech_finance_essay", "crayon_capital") and not shorts_mode:
         duration = min(max(duration, 360.0), 480.0)
     elif category in ("absurd_science", "what_if", "whatif", "absurd_engineering", "aviation", "blackbox", "havacilik", "flight") and not shorts_mode:
         # Other long-form essays retain their established 10-15 minute target.
         duration = min(max(duration, 600.0), 900.0)
         
-    # Determine the speech rate based on the target language.
-    if lang == "tr":
+    # Crayon Combat uses a strict 850-950 word budget for a 6-7 minute cut.
+    if category in ("crayon_combat", "military", "military_tech") and not shorts_mode:
+        effective_rate = 2.3
+    elif lang == "tr":
         effective_rate = 2.8
     elif lang in ("ja", "ko", "zh"):
         effective_rate = 3.0
@@ -716,7 +753,7 @@ def _build_prompt(channel_config: dict, planned_topic: str = None) -> str:
     elif shorts_mode:
         num_scenes = max(3, min(10, int(duration / 10)))
     elif category in ("crayon_combat", "military", "military_tech"):
-        num_scenes = max(22, min(32, int(duration / 16)))
+        num_scenes = max(28, min(36, int(duration / 24.0)))
     elif category in ("tech_finance_essay", "crayon_capital"):
         num_scenes = max(22, min(32, int(duration / 16)))
     elif category in ("absurd_science", "what_if", "whatif", "absurd_engineering", "aviation", "blackbox", "havacilik", "flight"):
@@ -840,40 +877,58 @@ Each scene must contain:
 Respond ONLY with the JSON object.""", topic, lang_name
 
     if category in ("crayon_combat", "military", "military_tech"):
-        return f"""Generate an entertaining, satirical military tech breakdown video essay script in the style of "Crayon Combat" (combining authentic military hardware engineering specs with comedic stickman character reactions).
+        return f"""You are the Head Writer of "Tactical Crayon", a wildly popular military satire documentary channel in the style of OverSimplified and Kurzgesagt.
 
-Vehicle/Topic: "{topic}"
+Topic: "{topic}"
 Language: {lang_name}
 Date: {today}
 
-STRICT REQUIREMENTS:
-- Treat "{topic}" as a real-world subject, not permission to invent programs, scandals, tests, quotations, or costs. Use only claims supported by the supplied topic or credible public sources. If you cannot verify a number or named program, omit it or label it explicitly as an estimate/hypothetical. Never fabricate a source.
-- Start scene 1 in medias res with a verified surprise or contradiction, explain the stakes, and pose the question the video will answer in the first 5-10 seconds. No greeting, channel introduction, or historical preamble. Do not use an unverified anecdote or figure as the hook.
-- Open one evidence-backed question in the hook and resolve it before the final verdict. Pay off the hook early, then add a useful reveal, visual change, or concise callout every 20-30 seconds.
-- Use exactly {num_scenes} scenes and target {duration:.0f} seconds (~{word_count} words in {lang_name}), for a 6-8 minute finished video. Keep scene lengths varied, cut repetition, and make each scene support visual changes about every 4-6 seconds; shorten rather than pad when evidence is limited.
-- Build a clear arc: opening promise; how the subject works; evidence-backed trade-offs; what the evidence does and does not establish; concise verdict.
-- Each scene narration should average about {words_per_scene} words in {lang_name}, energetic, witty, and informative.
-- Include three distinct title options under 75 characters, one thumbnail_text of 2-4 words, a thumbnail_concept with one focal object and one expressive character, and a "sources" array of credible source names and URLs.
-- Include a "fact_check_notes" array that distinguishes confirmed facts, estimates, and claims omitted for lack of evidence.
-- Incorporate character reactions from the 4 satirical archetypes:
-  * [DEFENSE_CEO]: The contractor executive justifying outrageous costs.
-  * [GENERAL]: The stressed Pentagon general panicking over the bills.
-  * [PILOT]: The sweating test pilot dealing with high-tech quirks.
-  * [SPY]: The rival foreign agent inspecting the machine with binoculars.
-- The title, description, keywords, tags, and narrations MUST be in {lang_name}.
-- The image_prompt MUST be in English.
-- Character jokes must not introduce new factual claims. Keep military details high-level; do not provide operational instructions.
-- Include "audio_cue" per scene: "impact", "drop", or "none". Use "drop" only for a meaningful reveal or comedic pause, not as a repetitive effect.
+CREATIVE MANDATE:
+- Genre: High-energy military hardware satire and engineering documentary. Think: OverSimplified meets defense procurement comedy.
+- Characters: Incorporate hilarious, sharp reactions from the 4 iconic archetypes:
+  * [DEFENSE_CEO]: Greedy contractor selling gold-plated weapons systems and absurd gadgets.
+  * [GENERAL]: Stressed Pentagon commander watching budgets explode.
+  * [PILOT]: Sweating test pilot dealing with melting dials and canopy greenhouse effects.
+  * [SPY]: Rival intelligence officer taking notes and trying to reverse-engineer failed equipment.
+- Story Structure (Full 11-14 minute video essay):
+  * Act 1 (Scenes 1-4): The Sales Pitch & The Absurd Promise (The $68B contract, the impossible claims).
+  * Act 2 (Scenes 5-14): Fatal Mistake #1 to #3 (Cockpit thermal crisis, 48°C wax melt, sensor bloom).
+  * Act 3 (Scenes 15-24): Fatal Mistake #4 & #5 (Laminate friction, night interdiction, $280 sponges, Arctic freezing).
+  * Act 4 (Scenes 25-{num_scenes}): The Pentagon Hearings & Battlefield Reality (Troops revert to simple solutions).
+- Narration: High energy, punchy spoken {lang_name}, witty and dramatic. Exactly ~55-75 words per scene.
+- Dialogue: Every scene MUST have a funny in-character quote for character_dialogue.
 
-Each scene must contain:
-- "narration": The entertaining, source-grounded narration in {lang_name} (~{words_per_scene} words).
-- "character": One of ["DEFENSE_CEO", "GENERAL", "PILOT", "SPY"].
-- "character_quote": A funny 1-sentence quip/reaction in {lang_name} spoken by that character.
-- "visual_type": "editorial_briefing", "blueprint_spec", or "stickman_reaction".
-- "image_prompt": An English visual prompt based only on this scene's supported subject matter; do not add numbers or technical claims.
-- "emotion": The emotional tone of this scene (choose from: satirical, dramatic, excited, shocked).
-
-Respond ONLY with the JSON object.""", topic, lang_name
+OUTPUT JSON FORMAT:
+Return valid JSON only matching:
+{{
+  "title": "{topic}",
+  "vehicle_name": "Official Military System Name (e.g. Integrated Tactical Inscription System Mark IV)",
+  "vehicle_nickname": "Satirical Nickname (e.g. The Melted Menace / Tactical Crayola Disaster)",
+  "vehicle_type": "Military System Category",
+  "key_specs": {{
+    "unit_cost": "$6,420 per stylus kit",
+    "program_cost": "$68.7 Billion",
+    "top_speed": "Mach 0.00002 (Hand Velocity)",
+    "primary_flaw": "Melts at 48°C in cockpits"
+  }},
+  "description": "Comprehensive, viral YouTube video description (150-250 words) with chapters, funny synopsis, question, and hashtags (#TacticalCrayon #MilitaryTech #CrayonCombat #DefenseSatire)",
+  "tags": ["Tactical Crayon", "Military Tech", "Crayon Combat", "Defense Contractor", "Pentagon", "Military Mistakes", "Engineering Disaster", "Video Essay", "Military Documentary", "Satire"],
+  "keywords": ["tactical crayon", "military satire", "defense spending", "pentagon fails", "crayon combat"],
+  "style_prompt": "Crayon Combat vector cartoon stick figures, dark cyan tactical blueprint schematics, high contrast military briefing",
+  "scenes": [
+    {{
+      "scene_id": 1,
+      "chapter": "THE SALES PITCH",
+      "narration": "Narration text for scene 1 (~55-75 words in {lang_name})...",
+      "active_character": "DEFENSE_CEO",
+      "character_dialogue": "Short, hilarious 10-20 word character reaction quote in {lang_name}...",
+      "visual_type": "stickman_reaction",
+      "image_prompt": "Defense contractor stickman holding a glowing gold-plated tactical wax marker on an auditorium stage with massive military budget charts showing rising billions.",
+      "emotion": "satirical"
+    }}
+  ]
+}}
+Generate exactly {num_scenes} scenes in the scenes array.""", topic, lang_name
 
     if category in ("tech_finance_essay", "crayon_capital"):
         return f"""Generate a forensic finance and tech documentary essay in the visual style of "Crayon Capital" (dark slate aesthetic, sourced financial charts, highlighted public filings, and capital-flow diagrams).
@@ -1654,6 +1709,125 @@ def _normalize_gemini_model(model: str) -> str:
     return model.strip()
 
 
+def _crayon_timeline_response_schema(gtypes):
+    def string():
+        return gtypes.Schema(type=gtypes.Type.STRING)
+
+    def string_array():
+        return gtypes.Schema(type=gtypes.Type.ARRAY, items=string())
+
+    source = gtypes.Schema(
+        type=gtypes.Type.OBJECT,
+        properties={
+            "source_id": string(),
+            "name": string(),
+            "url": string(),
+            "published_at": string(),
+        },
+        required=["source_id", "name", "url", "published_at"],
+    )
+    project_meta = gtypes.Schema(
+        type=gtypes.Type.OBJECT,
+        properties={
+            "category": string(),
+            "title": string(),
+            "target_duration_sec": gtypes.Schema(type=gtypes.Type.NUMBER),
+            "total_words": gtypes.Schema(type=gtypes.Type.INTEGER),
+            "fictional_satire": gtypes.Schema(type=gtypes.Type.BOOLEAN),
+            "sources": gtypes.Schema(type=gtypes.Type.ARRAY, items=source),
+        },
+        required=[
+            "category", "title", "target_duration_sec", "total_words",
+            "fictional_satire", "sources",
+        ],
+    )
+    primary_asset = gtypes.Schema(
+        type=gtypes.Type.OBJECT,
+        properties={
+            "type": string(),
+            "asset_id": string(),
+            "animation": string(),
+            "highlight": string(),
+        },
+        required=["type", "asset_id", "animation"],
+    )
+    b_roll = gtypes.Schema(
+        type=gtypes.Type.OBJECT,
+        properties={"source": string(), "asset_id": string(), "text_badge": string()},
+        required=["source", "asset_id"],
+    )
+    visual = gtypes.Schema(
+        type=gtypes.Type.OBJECT,
+        properties={
+            "engine": string(),
+            "layout": string(),
+            "primary_asset": primary_asset,
+            "b_roll": b_roll,
+        },
+        required=["engine", "layout", "primary_asset", "b_roll"],
+    )
+    character_layer = gtypes.Schema(
+        type=gtypes.Type.OBJECT,
+        properties={
+            "active": gtypes.Schema(type=gtypes.Type.BOOLEAN),
+            "character_id": string(),
+            "pose": string(),
+            "bubble_dialogue": string(),
+            "screen_position": string(),
+        },
+        required=["active", "character_id", "pose", "bubble_dialogue", "screen_position"],
+    )
+    audio_cues = gtypes.Schema(
+        type=gtypes.Type.OBJECT,
+        properties={
+            "sfx": string_array(),
+            "music_track": string(),
+            "music_cut": gtypes.Schema(type=gtypes.Type.BOOLEAN),
+            "music_cut_duration_sec": gtypes.Schema(type=gtypes.Type.NUMBER),
+        },
+        required=["sfx", "music_track", "music_cut"],
+    )
+    shot = gtypes.Schema(
+        type=gtypes.Type.OBJECT,
+        properties={
+            "scene_id": string(),
+            "shot_id": string(),
+            "chapter": string(),
+            "duration_sec": gtypes.Schema(type=gtypes.Type.NUMBER),
+            "narration_script": string(),
+            "source_refs": string_array(),
+            "visual": visual,
+            "character_layer": character_layer,
+            "audio_cues": audio_cues,
+        },
+        required=[
+            "scene_id", "shot_id", "chapter", "duration_sec", "narration_script",
+            "source_refs", "visual", "character_layer", "audio_cues",
+        ],
+    )
+    title_variant = gtypes.Schema(
+        type=gtypes.Type.OBJECT,
+        properties={"title": string()},
+        required=["title"],
+    )
+    return gtypes.Schema(
+        type=gtypes.Type.OBJECT,
+        properties={
+            "project_meta": project_meta,
+            "title_variants": gtypes.Schema(type=gtypes.Type.ARRAY, items=title_variant),
+            "thumbnail_text": string(),
+            "description": string(),
+            "tags": string_array(),
+            "fact_check_notes": string_array(),
+            "timeline_scenes": gtypes.Schema(type=gtypes.Type.ARRAY, items=shot),
+        },
+        required=[
+            "project_meta", "title_variants", "thumbnail_text", "description",
+            "tags", "fact_check_notes", "timeline_scenes",
+        ],
+    )
+
+
 class GeminiWriter:
     def __init__(self, api_key: str, model: str = "gemini-2.5-flash"):
         from google import genai
@@ -1669,7 +1843,49 @@ class GeminiWriter:
         category = channel_config.get("topic_category", "space")
         lang = channel_config.get("language", "tr")
 
-        if category in ("whatsapp_stories", "whatsapp_chat", "whatsapp"):
+        if category in ("crayon_combat", "military", "military_tech"):
+            response_schema = self._gtypes.Schema(
+                type=self._gtypes.Type.OBJECT,
+                properties={
+                    "title": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                    "vehicle_name": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                    "vehicle_nickname": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                    "vehicle_type": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                    "key_specs": self._gtypes.Schema(
+                        type=self._gtypes.Type.OBJECT,
+                        properties={
+                            "unit_cost": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                            "program_cost": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                            "top_speed": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                            "primary_flaw": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                        }
+                    ),
+                    "description": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                    "tags": self._gtypes.Schema(type=self._gtypes.Type.ARRAY, items=self._gtypes.Schema(type=self._gtypes.Type.STRING)),
+                    "keywords": self._gtypes.Schema(type=self._gtypes.Type.ARRAY, items=self._gtypes.Schema(type=self._gtypes.Type.STRING)),
+                    "style_prompt": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                    "scenes": self._gtypes.Schema(
+                        type=self._gtypes.Type.ARRAY,
+                        items=self._gtypes.Schema(
+                            type=self._gtypes.Type.OBJECT,
+                            properties={
+                                "scene_id": self._gtypes.Schema(type=self._gtypes.Type.INTEGER),
+                                "chapter": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                                "narration": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                                "active_character": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                                "character_dialogue": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                                "visual_type": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                                "image_prompt": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                                "emotion": self._gtypes.Schema(type=self._gtypes.Type.STRING),
+                            },
+                            required=["scene_id", "chapter", "narration", "active_character", "character_dialogue", "visual_type", "image_prompt", "emotion"]
+                        )
+                    ),
+                },
+                required=["title", "vehicle_name", "description", "tags", "scenes"],
+            )
+            sys_prompt = get_system_prompt(category, language=lang)
+        elif category in ("whatsapp_stories", "whatsapp_chat", "whatsapp"):
             response_schema = self._gtypes.Schema(
                 type=self._gtypes.Type.OBJECT,
                 properties={
@@ -2129,14 +2345,21 @@ Generate aviation topics matching the following sub-themes only:
 Each generated topic must refer to a real-world aviation incident with its flight number/name (e.g. 'Avianca Flight 52', 'Gimli Glider', 'JFK Runway Incursion 2023')."""
             keywords_instruction = "The 'anahtar_kelimeler' should be English aviation/aircraft search terms (e.g. 'boeing 737 emergency landing', 'airplane engine fire cockpit')."
         elif category in ("crayon_combat", "military", "military_tech"):
-            category_instruction = """Crucial: The channel is "Tactical Crayon", an entertaining, source-grounded military technology and engineering channel with satirical stickman reactions.
-Generate topics about identifiable, publicly documented aircraft, vehicles, engineering decisions, procurement history, or test programs. Prefer subjects with accessible primary or reputable sources. Do not invent military programs, equipment, battlefield incidents, tests, procurement scandals, or large cost figures. Never present a fictional premise as real; avoid "secret language of combat marking" and similar unsupported claims.
-The 'konu' must name the real subject and a specific evidence-backed question or trade-off. The 'baslik' must be under 75 characters, lead with the recognizable subject, and create curiosity without unsupported figures, absolute claims, or generic listicle wording. Return source leads with each topic where possible."""
-            keywords_instruction = "The 'anahtar_kelimeler' should be concise English search terms tied to the named real subject and public sources; do not add unsupported cost or performance claims."
+            category_instruction = """Crucial: The channel is "Tactical Crayon", a wildly entertaining military satire channel in the style of OverSimplified. Generate FUNNY, DRAMATIC, ABSURD topics about military cost overruns, engineering disasters, ridiculous procurement decisions, and battlefield absurdities.
+Good topic examples: "The $68 Billion Wax Crayon That Crashed an F-16", "5 Times the Pentagon Spent a Fortune on Obvious Things", "The Secret Symbols Soldiers Draw on Doors (And Why They Matter)", "Why the US Military's Most Expensive Tool Was a Pencil".
+Topics should be satirical, entertaining, and feature real military themes (aircraft, weapons, procurement, field operations) with an absurdist twist. Sensational premises, exaggerated cost figures, and "secret" military lore are ENCOURAGED.
+The 'konu' must describe the satirical premise vividly. The 'baslik' must be under 75 characters, punchy, curiosity-driven, and use numbers or shocking claims to drive clicks."""
+            keywords_instruction = "The 'anahtar_kelimeler' should be English military/satire search terms (e.g. 'military fails', 'pentagon waste', 'f-16 cockpit secrets', 'military equipment cost')."
         elif category in ("tech_finance_essay", "crayon_capital"):
             category_instruction = """Crucial: The channel produces forensic financial documentaries in the style of "Crayon Capital" (analyzing AI bubble collapses, venture capital cash burn, corporate bankruptcies, and crypto frauds).
 Generate intriguing business/tech documentary topics (e.g. 'The First Big Victim of the AI Bubble', 'Why 90% of AI Startups Will Die', 'WeWork: The $47 Billion Illusion', 'The 48-Hour Collapse of Silicon Valley Bank')."""
             keywords_instruction = "The 'anahtar_kelimeler' should be English financial search terms (e.g. 'ai bubble crash chart', 'venture capital cash burn document', 'tech startup collapse')."
+        elif category in ("basketball_analysis", "basketball", "sports", "nba", "thebasketballshows"):
+            category_instruction = """Crucial: The channel is "The Basketball Show", dedicated to gripping NBA basketball storytelling, tactical play breakdowns, mind-blowing records, and player psychology.
+Generate viral basketball Shorts topics (e.g. 'Why Nobody Could Block Kareem\\'s Skyhook', 'The Secret Stat Proving Steph Curry is Still Peaking', 'The Illegal Move Michael Jordan Used for 15 Years', 'Why Shaq Refused to Shoot Free Throws Underhanded').
+The 'baslik' must be punchy, curiosity-inducing, and under 65 characters.
+The 'konu' must describe the specific basketball play, player, or controversy vividly."""
+            keywords_instruction = "The 'anahtar_kelimeler' should be English NBA/basketball search terms (e.g. 'steph curry 3 point highlights', 'michael jordan crossover', 'shaq dunks nba')."
         else:
             category_instruction = "Crucial: The channel is about astronomy, space exploration, physics, and planetary science. Generate space-related topics only."
             keywords_instruction = "The 'anahtar_kelimeler' should be English NASA/science search terms (e.g. 'neutron star', 'mars rover tracks')."

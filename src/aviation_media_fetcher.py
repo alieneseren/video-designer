@@ -250,15 +250,133 @@ CORE_AVIATION_TAGS = {
     'tarmac', 'airport', 'turbofan', 'jet', 'radar'
 }
 
-def is_aviation_media(tags_str: str, climate: str = "NEUTRAL", aircraft_category: str = "jet") -> bool:
-    """Medya etiketlerinin kesinlikle havacılık konusu, uçak kategorisi ve iklimle uyumlu olduğunu doğrular."""
+PEACEFUL_CALM_TAGS = {
+    'sunny', 'sunshine', 'sun', 'blue sky', 'peaceful', 'calm', 'relaxing',
+    'relax', 'beach', 'summer', 'summer day', 'vacation', 'resort', 'holiday',
+    'serene', 'nature', 'green grass', 'meadow', 'park', 'flowers',
+    'bright sky', 'clear day', 'birds', 'gentle', 'smooth flight', 'tranquil',
+    'leisure', 'traveler', 'happy', 'smiling', 'enjoying', 'paradise', 'tropical',
+    'island', 'tourism', 'tourist', 'sunny day', 'blue water', 'swimming', 'clouds timelapse'
+}
+
+
+def detect_scene_tension_mood(text: str) -> str:
+    """
+    Sahne metnindeki dramatik tansiyon ve duygusal atmosferi saptar:
+    - DISASTER: Çarpışma, alev topu, enkaz, patlama, ölüm, can pazarı, facia
+    - HIGH_TENSION: Kontrol kaybı, stall, dalış, yangın alarmı, panik, çığlık, mayday
+    - TACTICAL_GROUND: Pist, taksi, sis, kule, telsiz, kalkış onayı
+    - INVESTIGATION: Kara kutu, NTSB, bulgular, kaza kırım raporu
+    - NORMAL_CRUISE: Standart seyir / nötr
+    """
+    t = str(text).lower()
+    disaster_keys = [
+        "crash", "collision", "impact", "erupt", "explosion", "flames", "fireball",
+        "inferno", "wreckage", "debris", "burned", "fatal", "casualties", "killed",
+        "died", "deadliest", "perished", "paramparça", "alev", "patlama", "ölüm",
+        "can verdi", "can pazarı", "enkaz", "çakıldı", "yangın", "facia", "katliam",
+        "lifeless", "bodies", "destroy", "wreck", "disaster"
+    ]
+    if any(k in t for k in disaster_keys):
+        return "DISASTER"
+        
+    high_tension_keys = [
+        "stall", "pull up", "dive", "overbank", "uncommanded", "mayday", "emergency",
+        "alarm", "warning", "scream", "pan pan", "critical", "lost control", "pitch down",
+        "spiral", "flameout", "engine failure", "düşüş", "irtifa kaybı", "panik", "çığlık",
+        "kontrolden çıktı", "kurtarılamaz", "burnu aşağı", "tehlike", "sink rate", "terrain"
+    ]
+    if any(k in t for k in high_tension_keys):
+        return "HIGH_TENSION"
+
+    investigation_keys = [
+        "investigation", "ntsb", "bfu", "ciaiac", "black box", "fdr", "cvr", "probable cause",
+        "findings", "safety board", "soruşturma", "kara kutu", "rapor", "tahkikat", "kaza kırım heyeti"
+    ]
+    if any(k in t for k in investigation_keys):
+        return "INVESTIGATION"
+        
+    ground_keys = [
+        "taxi", "runway", "holding point", "tower", "clearance", "fog", "visibility",
+        "taksi", "pist", "bekleme", "kule", "telsiz", "sis", "görüş mesafesi"
+    ]
+    if any(k in t for k in ground_keys):
+        return "TACTICAL_GROUND"
+        
+    return "NORMAL_CRUISE"
+
+
+def get_conflicting_aircraft_tags(target_aircraft: str) -> set:
+    """
+    Hedef uçak tipine (örn: Boeing 747) doğrudan çelişen/alakasız uçak modellerini döndürür.
+    Böylece '747 anlatılırken A320 veya Cessna çıkması' engellenir.
+    """
+    tgt = str(target_aircraft).lower()
+    conflicts = set()
+    
+    # 1. Hedef Boeing 747 (Dört motorlu dev Jumbo Jet)
+    if "747" in tgt:
+        conflicts |= {
+            "airbus", "a320", "a319", "a321", "a330", "a350", "a380",
+            "cessna", "piper", "propeller", "turboprop", "atr", "saab",
+            "f-16", "f-18", "f-22", "f-35", "fighter jet", "b-21", "b-2", "concorde",
+            "twin turboprop", "single engine", "private jet"
+        }
+    # 2. Hedef Turboprop (ATR 42/72, Saab 340, Dash 8)
+    elif any(k in tgt for k in ["atr", "saab", "dash", "turboprop", "propeller"]):
+        conflicts |= {
+            "boeing", "airbus", "747", "777", "787", "737", "a320", "a330", "a350", "a380",
+            "jumbo", "turbofan", "jet engine", "commercial jet", "contrail", "f-16", "fighter jet"
+        }
+    # 3. Hedef McDonnell Douglas / Douglas (DC-8, DC-9, MD-80, MD-82, DC-10)
+    elif any(k in tgt for k in ["md-8", "md-9", "dc-8", "dc-9", "dc-10", "md-11", "spanair", "fine air"]):
+        conflicts |= {
+            "747", "jumbo", "a380", "a350", "turboprop", "propeller", "cessna", "piper",
+            "fighter jet", "f-16", "f-22", "b-21"
+        }
+    # 4. Hedef Airbus (A330, A320)
+    elif "airbus" in tgt or "a330" in tgt or "a320" in tgt:
+        conflicts |= {
+            "747", "jumbo", "turboprop", "propeller", "cessna", "piper", "fighter jet"
+        }
+    # 5. Hedef Boeing 737 / 757
+    elif "737" in tgt or "757" in tgt:
+        conflicts |= {
+            "airbus", "a320", "a380", "747", "jumbo", "turboprop", "propeller", "cessna"
+        }
+        
+    return conflicts
+
+
+def is_aviation_media(
+    tags_str: str, 
+    climate: str = "NEUTRAL", 
+    aircraft_category: str = "jet",
+    target_aircraft: str = "",
+    scene_mood: str = "NORMAL_CRUISE"
+) -> bool:
+    """Medya etiketlerinin kesinlikle havacılık konusu, uçak kategorisi, spesifik model ve sahne tansiyonuyla uyumlu olduğunu doğrular."""
     tags = set([t.strip().lower() for t in str(tags_str).split(',')])
     
     # 1. Genel yasaklı nesneler, şehir/otoyol ve filtreler
     if any(f in tags for f in BASE_FORBIDDEN_TAGS):
         return False
 
-    # 2. İklim & Gece Uyumu
+    # 2. Tansiyon ve Felaket Anı Koruması (Huzurlu/Güneşli Doğa Videolarını Engelleme)
+    if scene_mood in ("DISASTER", "HIGH_TENSION"):
+        if any(p in tags for p in PEACEFUL_CALM_TAGS):
+            return False
+        # Felaket/panik anında sadece genel bulut/gökyüzü olan tatil stoklarını engelle
+        if ('clouds' in tags or 'sky' in tags) and not any(k in tags for k in ['fire', 'smoke', 'dark', 'storm', 'radar', 'cockpit', 'crash', 'wreckage', 'alert']):
+            return False
+
+    # 3. Model Çelişkisi Denetimi (X uçağı anlatılırken Z uçağı çıkmasını engelleme)
+    if target_aircraft:
+        conflicts = get_conflicting_aircraft_tags(target_aircraft)
+        if any(c in tags for c in conflicts):
+            return False
+
+    # 4. İklim & Gece Uyumu
     if climate == 'NIGHT':
         night_forbidden = {
             'sunny', 'daylight', 'blue sky', 'sun', 'bright', 'summer', 'beach',
@@ -289,13 +407,13 @@ def is_aviation_media(tags_str: str, climate: str = "NEUTRAL", aircraft_category
         if any(f in tags for f in non_winter_banned):
             return False
 
-    # 3. Motor & Uçak Tipi Uyumu (Turboprop vs Jet)
+    # 5. Motor & Uçak Tipi Uyumu (Turboprop vs Jet)
     if aircraft_category == 'turboprop':
         turboprop_forbidden = {'jet', 'turbofan', 'jet engine', 'commercial jet', 'winglet', 'jumbo', 'airbus', 'boeing', 'contrail', 'passenger jet'}
         if any(j in tags for j in turboprop_forbidden) and 'propeller' not in tags and 'turboprop' not in tags:
             return False
 
-    # 4. İzin verilen havacılık etiketleri (Sadece 'flight' tek başına yetersizdir, havacılık öznesi şarttır)
+    # 6. İzin verilen havacılık etiketleri (Sadece 'flight' tek başına yetersizdir, havacılık öznesi şarttır)
     if any(c in tags for c in CORE_AVIATION_TAGS):
         return True
     if 'flight' in tags and any(sub in tags for sub in ['clouds', 'sky', 'turboprop', 'propeller']):
@@ -362,6 +480,24 @@ def validate_aviation_media(
     if any(m in prompt or m in filename for m in military_forbidden):
         return False, "Vision QA Guard: Absürt askeri casus uçağı veya savaş uçağı reddedildi"
 
+    # 2. Uçak Modeli Çelişki Denetimi (X uçağı anlatılırken Z uçağı çıkmasını engelleme)
+    target_aircraft = str(meta.get("aircraft_type") or meta.get("aircraft_short") or meta.get("flight_name", "")).lower()
+    if target_aircraft:
+        conflicts = get_conflicting_aircraft_tags(target_aircraft)
+        for c in conflicts:
+            if c in filename or c in prompt:
+                return False, f"Vision QA Guard: Hedef uçak '{target_aircraft}' iken çelişen uçak modeli ('{c}') tespit edildi."
+
+    # 3. Duygu ve Tansiyon Denetimi (Felaket söylenirken sakin doğa/güneşli klibi engelleme)
+    comb_text = f"{narration} {prompt} {sc.get('emotion', '')}".lower()
+    scene_mood = detect_scene_tension_mood(comb_text)
+    if scene_mood in ("DISASTER", "HIGH_TENSION"):
+        for p in PEACEFUL_CALM_TAGS:
+            if p in filename or p in prompt:
+                return False, f"Vision QA Guard: Felaket/panik sahnesinde (Tansiyon: {scene_mood}) sakin/güneşli/huzurlu içerik ('{p}') reddedildi."
+        if scene_mood == "DISASTER" and any(g in filename for g in ["flying in clouds", "airport runway", "clouds aerial", "sunny"]):
+            return False, "Vision QA Guard: Kaza ve facia anında genel sakin bulut/pist stok videosu reddedildi."
+
     # Sıcak Yaz İkliminde Kar/Buz Denetimi (30 Derece Madrid vs Karlı Apron)
     if climate == "HOT":
         if any(w in prompt or w in filename for w in ["snow", "winter", "ice", "blizzard", "frost", "snowplow"]):
@@ -403,7 +539,9 @@ def search_pixabay_video(
     exclude_ids: Optional[set] = None, 
     min_duration: float = 4.0, 
     climate: str = "NEUTRAL",
-    aircraft_category: str = "jet"
+    aircraft_category: str = "jet",
+    target_aircraft: str = "",
+    scene_mood: str = "NORMAL_CRUISE"
 ) -> Optional[Dict[str, Any]]:
     """Pixabay Video API üzerinden sorguya uygun %100 havacılık MP4 videosu arar (KESİNLİKLE YATAY 16:9)."""
     api_key = get_pixabay_key()
@@ -426,11 +564,11 @@ def search_pixabay_video(
     for h in hits:
         if h.get("id") in exclude:
             continue
-        if not is_aviation_media(h.get("tags", ""), climate=climate, aircraft_category=aircraft_category):
+        if not is_aviation_media(h.get("tags", ""), climate=climate, aircraft_category=aircraft_category, target_aircraft=target_aircraft, scene_mood=scene_mood):
             continue
         
         videos = h.get("videos", {})
-        stream = videos.get("large") or videos.get("medium") or videos.get("small")
+        stream = videos.get("medium") or videos.get("large") or videos.get("small")
         if not stream:
             continue
             
@@ -449,7 +587,7 @@ def search_pixabay_video(
 
     chosen = random.choice(valid_hits[:5])
     videos = chosen.get("videos", {})
-    stream = videos.get("large") or videos.get("medium") or videos.get("small")
+    stream = videos.get("medium") or videos.get("large") or videos.get("small")
     if not stream or not stream.get("url"):
         return None
 
@@ -462,7 +600,14 @@ def search_pixabay_video(
     }
 
 
-def search_pixabay_photo(query: str, exclude_ids: Optional[set] = None, climate: str = "NEUTRAL", aircraft_category: str = "jet") -> Optional[Dict[str, Any]]:
+def search_pixabay_photo(
+    query: str, 
+    exclude_ids: Optional[set] = None, 
+    climate: str = "NEUTRAL", 
+    aircraft_category: str = "jet",
+    target_aircraft: str = "",
+    scene_mood: str = "NORMAL_CRUISE"
+) -> Optional[Dict[str, Any]]:
     """Pixabay Fotoğraf API üzerinden sorguya uygun yüksek çözünürlüklü yatay görsel arar."""
     api_key = get_pixabay_key()
     params = {
@@ -481,7 +626,7 @@ def search_pixabay_photo(query: str, exclude_ids: Optional[set] = None, climate:
     valid_hits = [
         h for h in hits 
         if h.get("id") not in exclude 
-        and is_aviation_media(h.get("tags", ""), climate=climate, aircraft_category=aircraft_category)
+        and is_aviation_media(h.get("tags", ""), climate=climate, aircraft_category=aircraft_category, target_aircraft=target_aircraft, scene_mood=scene_mood)
         and h.get("imageWidth", 1920) >= h.get("imageHeight", 1080)
     ]
     if not valid_hits:
@@ -657,7 +802,7 @@ def download_and_format_image(
     temp_img = output_path + ".tmp.jpg"
     try:
         req = urllib.request.Request(img_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=30) as resp, open(temp_img, "wb") as f_out:
+        with urllib.request.urlopen(req, timeout=12) as resp, open(temp_img, "wb") as f_out:
             f_out.write(resp.read())
 
         im = Image.open(temp_img).convert("RGB")
@@ -894,7 +1039,9 @@ def get_aviation_scene_media(
 
     narration_text = (scene_data.get("narration") or "").strip()
     prompt_text = (scene_data.get("image_prompt") or "").strip()
-    comb_text = f"{narration_text} {prompt_text}".lower()
+    comb_text = f"{narration_text} {prompt_text} {scene_data.get('emotion', '')}".lower()
+    scene_mood = detect_scene_tension_mood(comb_text)
+    target_aircraft = str(meta.get("aircraft_type") or meta.get("aircraft_short") or meta.get("flight_name", ""))
 
     DISASTER_TERMS = {
         "crash", "wreckage", "wreck", "debris", "salvage", "recovery", "crane",
@@ -942,10 +1089,25 @@ def get_aviation_scene_media(
     )
 
     def _try_fetch_video() -> Optional[str]:
+        # 1. Kaza ve Felaket Anı Koruma Kalkanı:
+        # Pixabay'de gerçek kaza/enkaz/facia videosu bulunmaz.
+        # Bu aşamada asla rastgele güneşli bulut veya pist klibi aranmaz!
+        if scene_mood == "DISASTER":
+            print(f"[AVIATION-FETCHER] 🛡️ Sahne {scene_idx} FELAKET/KAZA anı (Tansiyon: DISASTER). Sakin genel stok video araması durduruldu.")
+            return None
+
         video_query = classify_scene_aviation_query(scene_data, scene_idx, total_scenes, climate=climate, aircraft_category=aircraft_category)
-        print(f"[AVIATION-FETCHER] 🎬 Sahne {scene_idx} için Pixabay Video aranıyor: '{video_query}' (İklim: {climate}, Tip: {aircraft_category})...")
-        vid_hit = search_pixabay_video(video_query, exclude_ids=used, min_duration=target_dur, climate=climate, aircraft_category=aircraft_category)
-        if not vid_hit:
+        print(f"[AVIATION-FETCHER] 🎬 Sahne {scene_idx} için Pixabay Video aranıyor: '{video_query}' (İklim: {climate}, Model: {target_aircraft[:25]}, Tansiyon: {scene_mood})...")
+        vid_hit = search_pixabay_video(
+            video_query, 
+            exclude_ids=used, 
+            min_duration=target_dur, 
+            climate=climate, 
+            aircraft_category=aircraft_category,
+            target_aircraft=target_aircraft,
+            scene_mood=scene_mood
+        )
+        if not vid_hit and scene_mood != "HIGH_TENSION":
             if climate == "NIGHT":
                 fallback_query = "cockpit night flight"
             elif aircraft_category == "turboprop":
@@ -954,7 +1116,15 @@ def get_aviation_scene_media(
                 fallback_query = "blizzard"
             else:
                 fallback_query = "cockpit airplane"
-            vid_hit = search_pixabay_video(fallback_query, exclude_ids=used, min_duration=target_dur, climate=climate, aircraft_category=aircraft_category)
+            vid_hit = search_pixabay_video(
+                fallback_query, 
+                exclude_ids=used, 
+                min_duration=target_dur, 
+                climate=climate, 
+                aircraft_category=aircraft_category,
+                target_aircraft=target_aircraft,
+                scene_mood=scene_mood
+            )
         if vid_hit:
             vid_id = vid_hit["id"]
             vid_url = vid_hit["url"]
@@ -1214,25 +1384,36 @@ def get_aviation_scene_media(
             return str(trajectory_map_file)
 
     # ── STRATEJİ 3: Statik Fotoğraf Fallback (Pixabay Fotoğraf) ──
-    video_query = classify_scene_aviation_query(scene_data, scene_idx, total_scenes, climate=climate, aircraft_category=aircraft_category)
-    print(f"[AVIATION-FETCHER] 📷 Video bulunamadı, Pixabay Fotoğraf deneniyor: '{video_query}'...")
-    photo_hit = search_pixabay_photo(video_query, exclude_ids=used, climate=climate, aircraft_category=aircraft_category)
-    if photo_hit:
-        photo_id = photo_hit["id"]
-        photo_url = photo_hit["url"]
-        if download_and_format_image(photo_url, dest_img, target_w, target_h):
-            ok, reason = validate_aviation_media(dest_img, metadata=meta, scene_data=scene_data, scene_idx=scene_idx)
-            if not ok:
-                print(f"[VISION-QA-GUARD] ⛔ Pixabay Fotoğraf reddedildi: {reason}")
-                try:
-                    os.remove(dest_img)
-                except Exception:
-                    pass
-            else:
-                used.add(photo_id)
-                used.add(f"type_{scene_idx}:img")
-                print(f"[AVIATION-FETCHER] ✅ Pixabay Fotoğraf temin edildi: {dest_img}")
-                return dest_img
+    # Felaket ve yüksek tansiyon anında genel sakin/güneşli stok fotoğraf aramayı engelle
+    if scene_mood in ("DISASTER", "HIGH_TENSION"):
+        print(f"[AVIATION-FETCHER] 🛡️ Sahne {scene_idx} (Tansiyon: {scene_mood}) için genel sakin stok fotoğraf atlandı, doğrudan taktik/resmi canlandırmaya yönlendiriliyor.")
+    else:
+        video_query = classify_scene_aviation_query(scene_data, scene_idx, total_scenes, climate=climate, aircraft_category=aircraft_category)
+        print(f"[AVIATION-FETCHER] 📷 Video bulunamadı, Pixabay Fotoğraf deneniyor: '{video_query}' (Model: {target_aircraft[:25]})...")
+        photo_hit = search_pixabay_photo(
+            video_query, 
+            exclude_ids=used, 
+            climate=climate, 
+            aircraft_category=aircraft_category,
+            target_aircraft=target_aircraft,
+            scene_mood=scene_mood
+        )
+        if photo_hit:
+            photo_id = photo_hit["id"]
+            photo_url = photo_hit["url"]
+            if download_and_format_image(photo_url, dest_img, target_w, target_h):
+                ok, reason = validate_aviation_media(dest_img, metadata=meta, scene_data=scene_data, scene_idx=scene_idx)
+                if not ok:
+                    print(f"[VISION-QA-GUARD] ⛔ Pixabay Fotoğraf reddedildi: {reason}")
+                    try:
+                        os.remove(dest_img)
+                    except Exception:
+                        pass
+                else:
+                    used.add(photo_id)
+                    used.add(f"type_{scene_idx}:img")
+                    print(f"[AVIATION-FETCHER] ✅ Pixabay Fotoğraf temin edildi: {dest_img}")
+                    return dest_img
 
     # ── STRATEJİ 4: Doğrulanmış Wikimedia Fallback ──
     if climate == "NIGHT":

@@ -223,8 +223,11 @@ def _format_ts(seconds: float) -> str:
 
 
 def _escape_ass_text(text: str) -> str:
-    """ASS formatı için özel karakterleri kaçışlar."""
-    return text.replace("\\", "\\\\").replace("\n", "\\N").replace("\r", "")
+    """ASS formatı için özel karakterleri kaçışlar, imleç kaçaklarını (|) ve bilinen AI transkript hatalarını temizler."""
+    t = re.sub(r"[|`_~]", "", text)
+    t = re.sub(r"\bdaikon\b", "Dikembe", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bdaikon mutombo\b", "Dikembe Mutombo", t, flags=re.IGNORECASE)
+    return t.replace("\\", "\\\\").replace("\n", "\\N").replace("\r", "")
 
 
 # ──────────────────────────────────────────
