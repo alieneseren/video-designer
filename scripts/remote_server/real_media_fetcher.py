@@ -1072,7 +1072,95 @@ def fetch_photo_pool(
                     {"source": "wikimedia", "query": "thai street food wok"}
                 ])
 
-        # B) SPOR & BASKETBOL (NBA)
+        # B) HAVACILIK & UÇAK KABİNİ (Aviation / Flight)
+        elif any(w in combined for w in ["airplane", "airline", "aircraft", "cockpit", "flight", "cabin", "landing", "runway", "plane", "aviation"]):
+            if any(w in scene_corpus for w in ["dim", "cabin", "aisle", "light", "interior", "descend"]):
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "airplane cabin interior night"},
+                    {"source": "pixabay_photo", "query": "airplane cabin night"},
+                    {"source": "wikimedia", "query": "aircraft cabin passenger seats"},
+                    {"source": "pixabay_photo", "query": "airplane cabin interior"},
+                    {"source": "pixabay_photo", "query": "aircraft cabin passenger"}
+                ])
+            elif any(w in scene_corpus for w in ["takeoff", "landing", "wing", "engine", "runway", "window"]):
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "airplane window night wing"},
+                    {"source": "wikimedia", "query": "cockpit night landing runway"},
+                    {"source": "pixabay_photo", "query": "airplane runway lights night"},
+                    {"source": "pixabay_photo", "query": "airplane wing sunset flying"},
+                    {"source": "wikimedia", "query": "airport runway night"}
+                ])
+            elif any(w in scene_corpus for w in ["eye", "vision", "adapt", "pupil", "dark", "evacuate", "emergency", "exit"]):
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "airplane emergency exit lights cabin"},
+                    {"source": "pixabay_photo", "query": "airplane cabin dark night"},
+                    {"source": "wikimedia", "query": "airplane cabin interior night"},
+                    {"source": "pixabay_photo", "query": "airplane emergency lighting"}
+                ])
+            elif any(w in scene_corpus for w in ["attendant", "crew", "overhead", "passenger"]):
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "flight attendant cabin aircraft"},
+                    {"source": "pixabay_photo", "query": "flight attendant airplane interior"},
+                    {"source": "pixabay_photo", "query": "air hostess cabin service"},
+                    {"source": "wikimedia", "query": "passenger aircraft cabin"}
+                ])
+            else:
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "airplane cabin interior night"},
+                    {"source": "pixabay_photo", "query": "airplane window night wing"},
+                    {"source": "wikimedia", "query": "cockpit night landing runway"},
+                    {"source": "pixabay_photo", "query": "airplane flight sunset"}
+                ])
+
+        # C) LÜKS SEYAHAT, RESORT & VİLLA (5 Countries / Budget Luxury)
+        elif any(w in combined for w in ["live like royalty", "50/day", "fifty dollars", "resort", "resorts", "luxury", "villa", "bali", "vietnam", "thailand", "sri lanka", "budget"]):
+            if sc_idx == 0 or any(w in scene_corpus for w in ["infinity pool", "dinner", "routine", "fifty dollars"]):
+                scene_queries.extend([
+                    {"source": "pixabay_photo", "query": "infinity pool tropical resort luxury"},
+                    {"source": "wikimedia", "query": "infinity pool tropical resort"},
+                    {"source": "pixabay_photo", "query": "luxury resort swimming pool tropical"},
+                    {"source": "pixabay_photo", "query": "luxury villa pool tropical"}
+                ])
+            elif any(w in scene_corpus for w in ["bali", "vietnam", "villa", "carved"]):
+                scene_queries.extend([
+                    {"source": "pixabay_photo", "query": "bali luxury resort villa pool"},
+                    {"source": "pixabay_photo", "query": "vietnam tropical resort beach"},
+                    {"source": "wikimedia", "query": "bali luxury villa pool"},
+                    {"source": "pixabay_photo", "query": "ubud bali luxury villa"}
+                ])
+            elif any(w in scene_corpus for w in ["thailand", "sri lanka", "balcony", "palm"]):
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "sri lanka tropical resort beach"},
+                    {"source": "pixabay_photo", "query": "thailand luxury resort ocean view"},
+                    {"source": "pixabay_photo", "query": "phuket luxury resort balcony sea"},
+                    {"source": "pixabay_photo", "query": "tropical resort ocean balcony"}
+                ])
+            elif any(w in scene_corpus for w in ["dining", "hospitality", "beachfront", "pennies"]):
+                scene_queries.extend([
+                    {"source": "pixabay_photo", "query": "luxury beachfront dining table sunset"},
+                    {"source": "pixabay_photo", "query": "tropical resort beachfront restaurant dinner"},
+                    {"source": "wikimedia", "query": "beachfront restaurant luxury tropical"},
+                    {"source": "pixabay_photo", "query": "candlelight beach dinner tropical"}
+                ])
+            else:
+                scene_queries.extend([
+                    {"source": "pixabay_photo", "query": "tropical resort sunset panorama traveler"},
+                    {"source": "pixabay_photo", "query": "luxury travel destination tropical viewpoint"},
+                    {"source": "wikimedia", "query": "tropical beach resort sunset landscape"},
+                    {"source": "pixabay_photo", "query": "infinity pool tropical resort sunset"}
+                ])
+
+        # D) DAĞLAR, TRENLER & DOĞA (Mountains / Scenic Trains)
+        elif any(w in combined for w in ["mountain", "alps", "train", "railway", "cliff", "switzerland", "incline", "cogwheel"]):
+            scene_queries.extend([
+                {"source": "wikimedia", "query": "pilatus railway switzerland"},
+                {"source": "wikimedia", "query": "matterhorn zermatt switzerland"},
+                {"source": "pixabay_photo", "query": "scenic mountain train alps"},
+                {"source": "pixabay_photo", "query": "mountain peak landscape alps"},
+                {"source": "wikimedia", "query": "jungfraujoch railway switzerland"}
+            ])
+
+        # E) SPOR & BASKETBOL (NBA)
         elif category in ("basketball_analysis", "basketball", "sports", "nba", "thebasketballshows"):
             player_found = None
             for pk, pv in KNOWN_PLAYERS.items():
