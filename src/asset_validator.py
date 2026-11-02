@@ -446,6 +446,43 @@ class AssetValidator:
         if fsize < 15 * 1024:
             return False, f"Dosya boyutu çok küçük ({fsize / 1024:.1f} KB < 15 KB), muhtemelen bozuk veya thumbnail.", {}
 
+        # 0. Video format desteği (.mp4, .mov, .mkv, .webm, .ts)
+        if p.suffix.lower() in ('.mp4', '.mov', '.mkv', '.webm', '.ts'):
+            try:
+                import cv2
+                cap = cv2.VideoCapture(str(p))
+                if not cap.isOpened():
+                    return False, f"Bozuk video formatı açılamadı: {p.name}", {}
+                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+                dur = frame_count / fps if fps > 0 else 0.0
+                cap.set(cv2.CAP_PROP_POS_MSEC, 1000)
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    ret, frame = cap.read()
+                cap.release()
+                if not ret or frame is None:
+                    return False, f"Videodan kare okunamadı: {p.name}", {}
+                if min(w, h) < 480:
+                    return False, f"Düşük video çözünürlüğü ({w}x{h}).", {"width": w, "height": h}
+                stat = ImageStat.Stat(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
+                avg_stddev = sum(v ** 0.5 for v in stat.var) / 3.0
+                if avg_stddev < 8.0:
+                    return False, f"Video içeriği yetersiz / tek renk boş ekran (StdDev: {avg_stddev:.1f} < 8.0).", {"width": w, "height": h, "stddev": avg_stddev}
+                return True, "Video format ve bütünlük kontrolleri geçti.", {
+                    "width": w,
+                    "height": h,
+                    "duration": round(dur, 2),
+                    "format": p.suffix.upper(),
+                    "filesize_kb": round(fsize / 1024, 1),
+                    "stddev": round(avg_stddev, 2)
+                }
+            except Exception as e_vid:
+                return False, f"Video incelenirken hata: {e_vid}", {}
+
         # 1. Dosya bütünlüğü
         try:
             with Image.open(p) as img_test:
@@ -536,7 +573,7 @@ class AssetValidator:
             self._vision_model_type = "none"
             return False
 
-    def check_watermark(self, image_input: Union[str, Path, Image.Image]) -> Tuple[bool, float, str]:
+    def check_watermark(self, image_input: Union[str, Path, Image.Image], project_type: Optional[str] = None) -> Tuple[bool, float, str]:
         """
         Özel 2-sınıflı (binary) filigran ve ticari ajans damgası (Getty, Alamy, Shutterstock) denetimi.
         Softmax seyreltilmesine uğramadan tüm görsel ve alt-sağ / alt bölge bağımsız taranır.
@@ -559,6 +596,10 @@ class AssetValidator:
         w, h = img.size
         import torch
 
+        norm_proj = (project_type or "").lower().strip()
+        is_sports = norm_proj in ("basketball_analysis", "basketball", "sports", "nba", "thebasketballshows")
+        wm_th = 0.45 if is_sports else 0.65
+
         # 1. Filigran & Ajans Damgası (Köşe, Alt ve Göğüs Taraması)
         wm_texts = [
             "an authentic clean photo without watermark or stamp",
@@ -571,7 +612,6 @@ class AssetValidator:
             ("gogus_merkez", img.crop((int(w * 0.15), int(h * 0.20), int(w * 0.85), int(h * 0.65)))),
             ("orta_sag", img.crop((int(w * 0.25), int(h * 0.30), int(w * 0.98), int(h * 0.75))))
         ]
-        wm_th = 0.45
 
         for region_name, crop_img in wm_crops:
             try:
@@ -629,7 +669,7 @@ class AssetValidator:
 
         return False, 0.0, "Temiz"
 
-    def check_is_split_or_mockup(self, image_input: Union[str, Path, Any]) -> Tuple[bool, float, str]:
+    def check_is_split_or_mockup(self, image_input: Union[str, Path, Any], project_type: Optional[str] = None) -> Tuple[bool, float, str]:
         """
         Bölünmüş ekran (split-screen), forma kolajı, çoklu fotoğraf montajı veya ahşap zemin/mockup dedektörü.
         Dönen: (is_split_or_mockup: bool, confidence: float, reason: str)
@@ -649,10 +689,19 @@ class AssetValidator:
         else:
             img = image_input.convert("RGB")
 
-        texts = [
-            "a single authentic continuous basketball action photo on court",
-            "a split screen collage graphic with jerseys, multi photo montage banner, two photos side by side, or poster print on wood planks floor"
-        ]
+        norm_proj = (project_type or "").lower().strip()
+        is_sports = norm_proj in ("basketball_analysis", "basketball", "sports", "nba", "thebasketballshows")
+
+        if is_sports:
+            texts = [
+                "a single authentic continuous basketball action photo on court",
+                "a split screen collage graphic with jerseys, multi photo montage banner, two photos side by side, or poster print on wood planks floor"
+            ]
+        else:
+            texts = [
+                "a single real authentic photo or video scene",
+                "a split screen collage graphic with multiple sub-images, multi photo montage banner, two photos side by side, or framed poster mockup on wood floor"
+            ]
 
         import torch
         try:
@@ -875,34 +924,37 @@ class AssetValidator:
                 "stock photo watermark copyright", "watermark text overlay",
                 "getty images watermark", "shutterstock watermark", "stock watermark",
                 "white copyright watermark text", "watermark logo text",
-                # Bilet, Belge ve Boş Salon Filtresi
-                "paper ticket stub", "admission ticket", "stadium jumbotron scoreboard screen",
-                "stadium jumbotron scoreboard", "empty indoor arena seats",
-                "indoor bar counter bartender", "empty basketball stadium seats", "crowd sitting in arena stands",
-                "modern digital ticket", "close-up text document receipt", "ticket stub", "ticket",
-                "jumbotron", "scoreboard", "indoor bar", "bar counter", "bartender",
-                "empty basketball stadium", "empty stadium seats", "arena stands", "receipt", "document",
-                "luis scola", "scola", "luther head", "bonzi wells", "yao ming", "james harden", "harden",
-                "kevin mchale", "mchale", "celtics", "boston celtics", "larry bird",
-                "robert parish", "parish", "celtics green jersey", "boston garden",
-                "dennis johnson", "danny ainge",
-                "soccer", "football", "fifa", "world cup", "robinho",
-                "rural house", "backyard", "suburban driveway", "amateur kid playing basketball",
-                "pink house", "grass yard hoop", "rural court", "residential house",
-                "suburban backyard", "driveway hoop", "cargo shorts", "empty hoop",
-                "military", "aircraft", "cockpit", "fighter jet", "dirt court", "elementary school", "atsugi",
                 # Ahşap Zemin, Tablo ve Ürün Mockup Filtresi
                 "wood planks floor mockup", "wood floor mockup", "framed poster print",
-                "picture frame lying", "wooden table with framed picture", "sports merchandise product mockup",
+                "picture frame lying", "wooden table with framed picture",
                 "framed wall art mockup", "wood background with framed photo", "picture lying on wooden floor",
                 "canvas print mockup", "wood planks", "wooden floor", "wooden background",
-                # Bölünmüş Ekran, Kolaj ve Forma Şablonu Filtresi
+                # Bölünmüş Ekran, Kolaj ve Şablon Filtresi
                 "split screen collage graphic", "split screen with jerseys", "multi photo montage",
-                "two photos side by side", "composite split layout", "jersey display next to photo",
+                "two photos side by side", "composite split layout",
                 "magazine collage multiple cutouts"
             ]
-            if dynamic_negatives:
-                critical_keywords.extend([dn.lower().strip() for dn in dynamic_negatives if dn.strip()])
+            if is_sports:
+                critical_keywords.extend([
+                    "paper ticket stub", "admission ticket", "stadium jumbotron scoreboard screen",
+                    "stadium jumbotron scoreboard", "empty indoor arena seats",
+                    "indoor bar counter bartender", "empty basketball stadium seats", "crowd sitting in arena stands",
+                    "modern digital ticket", "close-up text document receipt", "ticket stub", "ticket",
+                    "jumbotron", "scoreboard", "indoor bar", "bar counter", "bartender",
+                    "empty basketball stadium", "empty stadium seats", "arena stands", "receipt", "document",
+                    "luis scola", "scola", "luther head", "bonzi wells", "yao ming", "james harden", "harden",
+                    "kevin mchale", "mchale", "celtics", "boston celtics", "larry bird",
+                    "robert parish", "parish", "celtics green jersey", "boston garden",
+                    "dennis johnson", "danny ainge",
+                    "soccer", "football", "fifa", "world cup", "robinho",
+                    "rural house", "backyard", "suburban driveway", "amateur kid playing basketball",
+                    "pink house", "grass yard hoop", "rural court", "residential house",
+                    "suburban backyard", "driveway hoop", "cargo shorts", "empty hoop",
+                    "military", "aircraft", "cockpit", "fighter jet", "dirt court", "elementary school", "atsugi",
+                    "sports merchandise product mockup", "jersey display next to photo"
+                ])
+                if dynamic_negatives:
+                    critical_keywords.extend([dn.lower().strip() for dn in dynamic_negatives if dn.strip()])
 
             for neg_idx, neg_val in enumerate(neg_probs):
                 neg_score = float(neg_val)
@@ -945,7 +997,7 @@ class AssetValidator:
         self,
         image_path: Union[str, Path],
         scene_prompt: str,
-        project_type: Optional[str] = "basketball_analysis",
+        project_type: Optional[str] = None,
         target_entity: Optional[str] = None,
         is_vertical: bool = True,
         blacklist_labels: Optional[List[str]] = None,
@@ -956,6 +1008,24 @@ class AssetValidator:
         Tüm kademeleri ve No-Loop kaydını denetleyen ana kalite kapısı fonksiyonu.
         """
         fpath = Path(image_path)
+        is_video = fpath.suffix.lower() in ('.mp4', '.mov', '.mkv', '.webm', '.ts')
+        visual_target: Union[Path, Image.Image] = fpath
+
+        if is_video:
+            try:
+                import cv2
+                cap = cv2.VideoCapture(str(fpath))
+                if cap.isOpened():
+                    cap.set(cv2.CAP_PROP_POS_MSEC, 1000)
+                    ret, frame = cap.read()
+                    if not ret or frame is None:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        ret, frame = cap.read()
+                    cap.release()
+                    if ret and frame is not None:
+                        visual_target = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            except Exception as e_cap:
+                logger.warning(f"Video kare çıkarma uyarısı ({fpath.name}): {e_cap}")
 
         # Kademe -1: No-Loop & Mükerrer Varlık Kontrolü
         if self.is_asset_used(fpath):
@@ -996,7 +1066,7 @@ class AssetValidator:
             )
 
         # Kademe 1.5: Bağımsız Filigran & Ticari Ajans Damgası Kapısı
-        has_wm, wm_score, wm_reason = self.check_watermark(fpath)
+        has_wm, wm_score, wm_reason = self.check_watermark(visual_target, project_type=project_type)
         if has_wm:
             logger.warning(f"🚫 [Kademe 1.5 - Filigran RED] {fpath.name}: {wm_reason}")
             return ValidationResult(
@@ -1011,7 +1081,7 @@ class AssetValidator:
             )
 
         # Kademe 1.6: Bölünmüş Ekran, Kolaj ve Mockup Dedektörü
-        is_split, split_score, split_reason = self.check_is_split_or_mockup(fpath)
+        is_split, split_score, split_reason = self.check_is_split_or_mockup(visual_target, project_type=project_type)
         if is_split:
             logger.warning(f"🚫 [Kademe 1.6 - Kolaj/Mockup RED] {fpath.name}: {split_reason}")
             return ValidationResult(
@@ -1026,7 +1096,7 @@ class AssetValidator:
             )
 
         # Kademe 1.8: İllüstrasyon & Suluboya / Dijital Çizim Dedektörü
-        is_ill, ill_score, ill_reason = self.check_is_illustration(fpath)
+        is_ill, ill_score, ill_reason = self.check_is_illustration(visual_target)
         if is_ill:
             logger.warning(f"🚫 [Kademe 1.8 - İllüstrasyon RED] {fpath.name}: {ill_reason}")
             return ValidationResult(
@@ -1042,7 +1112,7 @@ class AssetValidator:
 
         # Kademe 2: Zero-Shot Skorlama (SigLIP / CLIP)
         vision_ok, pos_sc, neg_sc, best_p, worst_n, vision_reason = self.validate_zero_shot(
-            image_input=fpath,
+            image_input=visual_target,
             scene_prompt=scene_prompt,
             blacklist_labels=blacklist_labels,
             dynamic_negatives=dynamic_negatives,

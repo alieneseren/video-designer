@@ -638,7 +638,8 @@ def get_real_scene_media(
     print(f"[REAL-MEDIA] Sahne {scene_idx} ({category}) için gerçek medya aranıyor (Plan: {len(query_plan)} sorgu)...")
 
     dyn_negatives = []
-    if query_builder is not None:
+    is_sports_cat = category in ("basketball_analysis", "basketball", "sports", "nba", "thebasketballshows")
+    if query_builder is not None and is_sports_cat:
         cq = query_builder.build_context_locked_queries(narr_text, fallback_entity=topic)
         dyn_negatives = cq.dynamic_negatives
 
