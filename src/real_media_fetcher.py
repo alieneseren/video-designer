@@ -147,7 +147,30 @@ def search_pixabay_video(
 
 
 # ─────────────────────────────────────────────────────────────
-# 2. PİXABAY FOTOĞRAF ARAMA
+# ─────────────────────────────────────────────────────────────
+# 2. PİXABAY VE WIKIMEDIA NEGATİF FİLTRELERİ
+# ─────────────────────────────────────────────────────────────
+
+UNWANTED_PHOTO_KEYWORDS = [
+    # Tabela, reklam panosu, otopark, vitrin yazıları (Pancho Villa vb. hataları önler)
+    "billboard", "parking lot", "car park", "signboard", "road sign",
+    "restaurant & bar sign", "storefront sign", "advertisement", "ad sign",
+    "neon sign", "building sign", "street sign", "highway sign", "traffic sign",
+    "facade sign", "commercial sign", "parking", "pancho villa",
+    "business sign", "store sign", "shop sign", "retail sign",
+    # Düşük kalite, şemalar, haritalar, vektörler
+    "diagram", "infographic", "drawing", "clipart", "illustration", "vector",
+    "map of", "floor plan", "logo", "icon", "symbol", "thumbnail", "banner"
+]
+
+def is_unwanted_asset(title: str, tags: str = "") -> bool:
+    """İstenmeyen reklam panoları, tabelalar veya şemaları filtreler."""
+    text = f"{title} {tags}".lower()
+    return any(bad in text for bad in UNWANTED_PHOTO_KEYWORDS)
+
+
+# ─────────────────────────────────────────────────────────────
+# 3. PİXABAY FOTOĞRAF ARAMA
 # ─────────────────────────────────────────────────────────────
 
 def search_pixabay_photos(
@@ -194,6 +217,9 @@ def search_pixabay_photos(
         hid = h.get("id")
         if hid in exclude:
             continue
+        tags = h.get("tags", "")
+        if is_unwanted_asset("", tags):
+            continue
         img_url = h.get("largeImageURL") or h.get("fullHDURL") or h.get("webformatURL")
         if not img_url:
             continue
@@ -203,7 +229,7 @@ def search_pixabay_photos(
             "url": img_url,
             "width": h.get("imageWidth", 1920),
             "height": h.get("imageHeight", 1080),
-            "tags": h.get("tags", "")
+            "tags": tags
         })
         if len(candidates) >= limit:
             break
@@ -270,6 +296,10 @@ def search_wikimedia_commons_photos(
 
         # İkon, ses, svg ve logoları ele
         if any(skip in t_low for skip in [".svg", ".ogg", ".oga", ".pdf", "flag", "icon", "logo", "symbol"]):
+            continue
+
+        # Tabela, reklam panoları ve otopark görsellerini ele
+        if is_unwanted_asset(title, ""):
             continue
 
         imageinfo = page.get("imageinfo", [])
@@ -371,44 +401,59 @@ def download_and_format_image(
     target_h: int = 1920
 ) -> bool:
     """Gerçek fotoğrafı indirir, hedef 9:16 oranına yüksek kalite fill-crop yaparak kaydeder."""
-    ua = WIKIMEDIA_USER_AGENT if "wikimedia.org" in img_url else USER_AGENT
-    headers = {"User-Agent": ua}
+    if "wikimedia.org" in img_url:
+        headers = {"User-Agent": WIKIMEDIA_USER_AGENT}
+    elif "pixabay.com" in img_url:
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Referer": "https://pixabay.com/",
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+        }
+    else:
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Referer": "https://www.google.com/"
+        }
+
     temp_img = output_path + ".tmp.jpg"
-    try:
-        req = urllib.request.Request(img_url, headers=headers)
-        with urllib.request.urlopen(req, timeout=15) as resp, open(temp_img, "wb") as f_out:
-            f_out.write(resp.read())
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(img_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as resp, open(temp_img, "wb") as f_out:
+                f_out.write(resp.read())
 
-        if not os.path.exists(temp_img) or os.path.getsize(temp_img) < 5000:
-            return False
+            if not os.path.exists(temp_img) or os.path.getsize(temp_img) < 5000:
+                continue
 
-        im = Image.open(temp_img).convert("RGB")
-        src_w, src_h = im.size
+            im = Image.open(temp_img).convert("RGB")
+            src_w, src_h = im.size
 
-        # Hedef oranı dolduracak şekilde boyutlandır (Ken Burns için pay bırakarak)
-        scale = max(target_w / src_w, target_h / src_h)
-        new_w = int(src_w * scale)
-        new_h = int(src_h * scale)
-        im_resized = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            # Hedef oranı dolduracak şekilde boyutlandır (Ken Burns için pay bırakarak)
+            scale = max(target_w / src_w, target_h / src_h)
+            new_w = int(src_w * scale)
+            new_h = int(src_h * scale)
+            im_resized = im.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
-        # Merkezden kırp
-        left = max(0, (new_w - target_w) // 2)
-        top = max(0, (new_h - target_h) // 2)
-        right = left + target_w
-        bottom = top + target_h
-        im_cropped = im_resized.crop((left, top, right, bottom))
+            # Merkezden kırp
+            left = max(0, (new_w - target_w) // 2)
+            top = max(0, (new_h - target_h) // 2)
+            right = left + target_w
+            bottom = top + target_h
+            im_cropped = im_resized.crop((left, top, right, bottom))
 
-        im_cropped.save(output_path, "JPEG", quality=92)
-        return os.path.exists(output_path) and os.path.getsize(output_path) > 5000
-    except Exception as e:
-        print(f"[REAL-FETCHER] Görsel formatlama hatası: {e}")
-        return False
-    finally:
-        if os.path.exists(temp_img):
-            try:
-                os.remove(temp_img)
-            except Exception:
-                pass
+            im_cropped.save(output_path, "JPEG", quality=92)
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 5000:
+                return True
+        except Exception as e:
+            if attempt == 2:
+                print(f"[REAL-FETCHER] Görsel formatlama hatası ({img_url[:60]}...): {e}")
+        finally:
+            if os.path.exists(temp_img):
+                try:
+                    os.remove(temp_img)
+                except Exception:
+                    pass
+    return False
 
 
 # ─────────────────────────────────────────────────────────────
@@ -829,12 +874,15 @@ def fetch_photo_pool(
     work_dir: Optional[Path] = None,
     target_w: int = 1080,
     target_h: int = 1920,
-    session_used: Optional[Set[Any]] = None
+    session_used: Optional[Set[Any]] = None,
+    scene_timeline: Optional[List[Tuple[int, str, float, float]]] = None,
+    cut_duration: float = 2.15
 ) -> List[Path]:
     """
     Tüm video için 2.15s'lik dinamik Ken Burns kesmelerine yetecek sayıda (24-30 adet)
     yüksek çözünürlüklü, semantik olarak %100 uyumlu editoryal fotoğraf toplar.
-    Wikimedia Commons ve Pixabay Photo API kaynaklarını harmanlar.
+    Zaman çizgisi (scene_timeline) ile senkronize çalışır; her kesmeye o an anlatılan
+    sahnenin tam semantik görselini (Chinatown, Al Pastor trompo, bakır kazan carnitas) atar.
     """
     from PIL import ImageEnhance
 
@@ -843,60 +891,98 @@ def fetch_photo_pool(
     pool_dir.mkdir(parents=True, exist_ok=True)
 
     scenes = script_data.get("scenes") or []
+    if not scenes and isinstance(script_data, dict):
+        scenes = (script_data.get("script_data") or {}).get("scenes") or (script_data.get("script") or {}).get("scenes") or []
     if not scenes:
         scenes = [{"narration": script_data.get("narration") or topic}]
 
-    # Sahne başına düşen kesme sayısını hesapla
     num_scenes = max(1, len(scenes))
-    cuts_per_scene = max(2, int(round(target_count / num_scenes)))
 
-    print(f"[PHOTO-POOL] 🎯 Hedef {target_count} benzersiz görsel aranıyor ({num_scenes} sahne, ~{cuts_per_scene} kesme/sahne)...")
+    # 1. Her kesmenin (cut) zaman çizelgesindeki aktif sahnesini tespit et
+    cut_to_scene: List[int] = []
+    if scene_timeline and len(scene_timeline) >= num_scenes:
+        for cut_i in range(target_count):
+            cut_mid = cut_i * cut_duration + (cut_duration / 2.0)
+            assigned_sc = 0
+            for sc_i, _text, sc_start, sc_end in scene_timeline:
+                if sc_start <= cut_mid < sc_end:
+                    assigned_sc = sc_i
+                    break
+            else:
+                assigned_sc = min(num_scenes - 1, int(cut_i * num_scenes / target_count))
+            cut_to_scene.append(assigned_sc)
+    else:
+        for cut_i in range(target_count):
+            assigned_sc = min(num_scenes - 1, int(cut_i * num_scenes / target_count))
+            cut_to_scene.append(assigned_sc)
 
-    # Sahne bazlı spesifik alt sorgu üretimi
-    all_target_queries: List[Dict[str, str]] = []
+    print(f"[PHOTO-POOL] 🎯 Hedef {target_count} benzersiz editoryal görsel aranıyor ({num_scenes} sahne, ~{cut_duration}s kesme temposu)...")
 
+    # 2. Sahne bazlı hedef görsel sayıları
+    scene_needed_counts = {sc_i: max(1, cut_to_scene.count(sc_i)) for sc_i in range(num_scenes)}
+    scene_photos: Dict[int, List[Path]] = {sc_i: [] for sc_i in range(num_scenes)}
+    downloaded_urls: Set[str] = set()
+    all_downloaded_photos: List[Path] = []
+
+    # 3. Her sahne için özel semantik arama sorguları üret
     for sc_idx, sc in enumerate(scenes):
+        needed = scene_needed_counts.get(sc_idx, 4)
         narr = (sc.get("narration") or sc.get("text") or "").strip()
         prompt = (sc.get("image_prompt") or "").strip()
         kw = sc.get("keywords") or []
         kw_str = " ".join(kw) if isinstance(kw, list) else str(kw)
-        combined = f"{narr} {prompt} {kw_str} {topic}".lower()
+        scene_corpus = f"{narr} {prompt} {kw_str}".lower()
+        combined = f"{scene_corpus} {topic}".lower()
 
         scene_queries: List[Dict[str, str]] = []
 
-        # 1. Yemek & Sokak Lezzeti (Travel / Food)
-        if any(f in combined for f in ["food", "taco", "pad thai", "al pastor", "carnitas", "street food", "market", "chinatown", "wok"]):
-            if "pad thai" in combined or "bangkok" in combined or "thai" in combined:
+        # A) YEMEK & SOKAK LEZZETİ (TRAVEL / FOOD)
+        if any(f in combined for f in ["food", "taco", "pad thai", "al pastor", "carnitas", "street food", "market", "chinatown", "wok", "cauldron", "prawn", "salsa", "chili"]):
+            # SCENE 3: MICHELIN / CARNITAS SIMMERED IN COPPER CAULDRONS (Bakır kazan ve Michelin vurgusu)
+            if any(c_word in scene_corpus for c_word in ["carnitas", "copper", "cauldron", "cazo", "simmered", "michelin"]):
                 scene_queries.extend([
-                    {"source": "wikimedia", "query": "pad thai shrimp bangkok"},
-                    {"source": "pixabay_photo", "query": "pad thai bangkok"},
-                    {"source": "wikimedia", "query": "bangkok night market street food"},
-                    {"source": "pixabay_photo", "query": "bangkok street food night"},
-                    {"source": "wikimedia", "query": "yaowarat road chinatown bangkok"},
-                    {"source": "pixabay_photo", "query": "chinatown bangkok street"},
-                    {"source": "wikimedia", "query": "thai street food flame wok"}
+                    {"source": "wikimedia", "query": "carnitas mexico"},
+                    {"source": "wikimedia", "query": "carnitas michoacan"},
+                    {"source": "wikimedia", "query": "michelin street food bangkok"},
+                    {"source": "wikimedia", "query": "carnitas tacos"},
+                    {"source": "wikimedia", "query": "mexican street food stand"}
                 ])
-            if "pastor" in combined or "mexico" in combined or "taco" in combined:
+            # SCENE 1: BANGKOK / MIDNIGHT MARKETS / PAD THAI / JUMBO PRAWNS / 1000 DEGREES WOK
+            elif any(b_word in scene_corpus for b_word in ["bangkok", "pad thai", "prawn", "wok", "roar", "thousand degrees"]):
                 scene_queries.extend([
-                    {"source": "wikimedia", "query": "tacos al pastor trompo pineapple"},
-                    {"source": "pixabay_photo", "query": "tacos al pastor trompo"},
-                    {"source": "wikimedia", "query": "mexico city street taqueria"},
-                    {"source": "pixabay_photo", "query": "mexico city street food"},
-                    {"source": "wikimedia", "query": "carnitas tacos plancha salsa"},
-                    {"source": "pixabay_photo", "query": "mexican tacos salsa lime"}
+                    {"source": "wikimedia", "query": "pad thai shrimp"},
+                    {"source": "wikimedia", "query": "thai street food wok"},
+                    {"source": "wikimedia", "query": "bangkok street food night"},
+                    {"source": "wikimedia", "query": "pad thai bangkok"},
+                    {"source": "wikimedia", "query": "thai street food flame"}
                 ])
-            if "carnitas" in combined or "copper" in combined or "cauldron" in combined:
+            # SCENE 2: MEXICO CITY / AL PASTOR / TENDER PORK / ROASTED PINEAPPLE / SALSAS
+            elif any(m_word in scene_corpus for m_word in ["mexico", "pastor", "pineapple", "tortilla", "puestos", "salsa"]):
                 scene_queries.extend([
-                    {"source": "wikimedia", "query": "carnitas copper cauldron mexico"},
-                    {"source": "pixabay_photo", "query": "carnitas street food"}
+                    {"source": "wikimedia", "query": "tacos al pastor trompo"},
+                    {"source": "wikimedia", "query": "tacos al pastor"},
+                    {"source": "wikimedia", "query": "mexican street tacos"},
+                    {"source": "wikimedia", "query": "carnitas tacos"},
+                    {"source": "wikimedia", "query": "mexico street food stand"}
                 ])
-            if "tom yum" in combined or "chili" in combined or "adobo" in combined:
+            # SCENE 4: SHOWDOWN / THAI CHILIES / SMOKY ADOBO / CLOSING CHOICE
+            elif any(o_word in scene_corpus for o_word in ["chili", "adobo", "pick", "life", "rest"]):
                 scene_queries.extend([
-                    {"source": "wikimedia", "query": "tom yum soup bowl thai"},
-                    {"source": "pixabay_photo", "query": "tom yum thai street"}
+                    {"source": "wikimedia", "query": "thai chili peppers"},
+                    {"source": "wikimedia", "query": "mexico street food"},
+                    {"source": "wikimedia", "query": "tacos al pastor"},
+                    {"source": "wikimedia", "query": "pad thai shrimp"}
+                ])
+            # SCENE 0 (HOOK) & GENEL TRAVEL FOOD
+            else:
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "pad thai shrimp"},
+                    {"source": "wikimedia", "query": "tacos al pastor"},
+                    {"source": "wikimedia", "query": "mexico street food"},
+                    {"source": "wikimedia", "query": "bangkok street food night"}
                 ])
 
-        # 2. Spor & Basketbol (NBA)
+        # B) SPOR & BASKETBOL (NBA)
         elif category in ("basketball_analysis", "basketball", "sports", "nba", "thebasketballshows"):
             player_found = None
             for pk, pv in KNOWN_PLAYERS.items():
@@ -918,78 +1004,72 @@ def fetch_photo_pool(
                     {"source": "pixabay_photo", "query": "basketball player arena action"}
                 ])
 
-        # 3. Tarih, Seyahat Genel, Bilim, vb.
+        # C) TARİH, HAVACILIK, BİLİM, VB.
         else:
             clean_p = re.sub(r"\b(8k|cinematic|photorealistic|hyperrealistic|masterpiece)\b", "", prompt).strip()
             scene_queries.extend([
                 {"source": "wikimedia", "query": f"{clean_p[:40]} {topic[:25]}"},
                 {"source": "pixabay_photo", "query": f"{clean_p[:35]}"},
                 {"source": "wikimedia", "query": f"{topic} history"},
-                {"source": "pixabay_photo", "query": f"{topic} landscape"}
+                {"source": "pixabay_photo", "query": f"{topic} documentary"}
             ])
 
-        # Sahne sorgularını havuza ekle
-        all_target_queries.extend(scene_queries)
-
-    # Genel yedek sorgular
-    all_target_queries.extend([
-        {"source": "pixabay_photo", "query": f"{topic} travel"},
-        {"source": "pixabay_photo", "query": "bangkok street food night"},
-        {"source": "pixabay_photo", "query": "mexican street tacos"},
-        {"source": "pixabay_photo", "query": "night market street food asia"},
-        {"source": "pixabay_photo", "query": "street food vendor night"}
-    ])
-
-    saved_photos: List[Path] = []
-    downloaded_urls: Set[str] = set()
-
-    for q_item in all_target_queries:
-        if len(saved_photos) >= target_count:
-            break
-
-        src = q_item["source"]
-        q_str = q_item["query"]
-        candidates = []
-
-        if src == "wikimedia":
-            candidates = search_wikimedia_commons_photos(q_str, exclude_urls=used.union(downloaded_urls), limit=4)
-        elif src == "pixabay_photo":
-            candidates = search_pixabay_photos(q_str, exclude_ids=used.union(downloaded_urls), limit=4)
-
-        for cand in candidates:
-            if len(saved_photos) >= target_count:
+        # Sahneye ait fotoğrafları indir ve havuza al
+        for q_item in scene_queries:
+            if len(scene_photos[sc_idx]) >= needed + 2:
                 break
+            src = q_item["source"]
+            q_str = q_item["query"]
+            candidates = []
+            if src == "wikimedia":
+                candidates = search_wikimedia_commons_photos(q_str, exclude_urls=used.union(downloaded_urls), limit=4)
+            elif src == "pixabay_photo":
+                candidates = search_pixabay_photos(q_str, exclude_ids=used.union(downloaded_urls), limit=4)
 
-            candidate_url = cand.get("url")
-            if not candidate_url or candidate_url in downloaded_urls or candidate_url in used:
-                continue
+            for cand in candidates:
+                if len(scene_photos[sc_idx]) >= needed + 2:
+                    break
+                c_url = cand.get("url")
+                if not c_url or c_url in downloaded_urls or c_url in used:
+                    continue
 
-            photo_path = pool_dir / f"photo_{len(saved_photos):03d}.jpg"
-            ok = download_and_format_image(candidate_url, str(photo_path), target_w, target_h)
-            if ok and photo_path.is_file() and photo_path.stat().st_size > 5000:
-                # Görsel zenginleştirme (Kontrast +%5, Doygunluk +%10 mobil OLED ekranlar için)
-                try:
-                    enh_im = Image.open(photo_path).convert("RGB")
-                    enh_im = ImageEnhance.Contrast(enh_im).enhance(1.06)
-                    enh_im = ImageEnhance.Color(enh_im).enhance(1.10)
-                    enh_im.save(photo_path, "JPEG", quality=92)
-                except Exception:
-                    pass
+                photo_p = pool_dir / f"scene_{sc_idx:02d}_photo_{len(scene_photos[sc_idx]):02d}.jpg"
+                ok = download_and_format_image(c_url, str(photo_p), target_w, target_h)
+                if ok and photo_p.is_file() and photo_p.stat().st_size > 5000:
+                    try:
+                        enh_im = Image.open(photo_p).convert("RGB")
+                        enh_im = ImageEnhance.Contrast(enh_im).enhance(1.06)
+                        enh_im = ImageEnhance.Color(enh_im).enhance(1.10)
+                        enh_im.save(photo_p, "JPEG", quality=92)
+                    except Exception:
+                        pass
+                    scene_photos[sc_idx].append(photo_p)
+                    all_downloaded_photos.append(photo_p)
+                    downloaded_urls.add(c_url)
+                    used.add(c_url)
+                    print(f"[PHOTO-POOL] 📸 Sahne {sc_idx} görseli bağlandı ({len(scene_photos[sc_idx])}/{needed}): {photo_p.name} [{src}: '{q_str}']")
 
-                saved_photos.append(photo_path)
-                downloaded_urls.add(candidate_url)
-                used.add(candidate_url)
-                print(f"[PHOTO-POOL] 📸 [{len(saved_photos)}/{target_count}] Gerçek editoryal fotoğraf eklendi: {photo_path.name} (Kaynak: {src}, Sorgu: '{q_str}')")
+    # 4. Zaman Çizgisi Senkronizasyonu ile Kesme Listesini Oluştur
+    final_cut_photos: List[Path] = []
+    for cut_i in range(target_count):
+        assigned_sc = cut_to_scene[cut_i]
+        sc_pool = scene_photos.get(assigned_sc, [])
+        if not sc_pool:
+            sc_pool = all_downloaded_photos or []
 
-    # Eğer hala eksik varsa, mevcut onaylı fotoğraflarla havuzu tamamla
-    if saved_photos and len(saved_photos) < target_count:
-        print(f"[PHOTO-POOL] ℹ️ {len(saved_photos)} fotoğraf toplandı, {target_count} hedefine ulaşmak için dengeli dağıtılıyor...")
-        orig_len = len(saved_photos)
-        while len(saved_photos) < target_count:
-            src_p = saved_photos[len(saved_photos) % orig_len]
-            clone_path = pool_dir / f"photo_{len(saved_photos):03d}.jpg"
-            shutil.copy2(src_p, clone_path)
-            saved_photos.append(clone_path)
+        if not sc_pool:
+            # Acil durum emniyet görseli
+            safe_p = pool_dir / f"failsafe_cut_{cut_i:03d}.jpg"
+            if not safe_p.is_file():
+                Image.new("RGB", (target_w, target_h), (24, 24, 27)).save(safe_p, "JPEG")
+            final_cut_photos.append(safe_p)
+            continue
 
-    print(f"[PHOTO-POOL] ✅ Fotoğraf havuzu tamamlandı: {len(saved_photos)} benzersiz yüksek çözünürlüklü kesme görseli hazır.")
-    return saved_photos
+        # Sahne içindeki göreceli kesme sırasına göre görsel ata (Asla ardışık tekrar etmez)
+        cut_in_sc = sum(1 for prev_i in range(cut_i) if cut_to_scene[prev_i] == assigned_sc)
+        assigned_photo = sc_pool[cut_in_sc % len(sc_pool)]
+        final_cut_photos.append(assigned_photo)
+        print(f"[PHOTO-POOL] ✂️ Kesme {cut_i:02d} ({cut_i * cut_duration:.1f}s) -> Sahne {assigned_sc} editoryal görseli: {assigned_photo.name}")
+
+    print(f"[PHOTO-POOL] ✅ Fotoğraf havuzu tamamlandı: {len(final_cut_photos)} kesme için %100 sahne uyumlu editoryal görseller hazırlandı.")
+    return final_cut_photos

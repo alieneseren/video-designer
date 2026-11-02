@@ -2442,6 +2442,8 @@ def _render_scene_aligned_general(
         target_w=width,
         target_h=height,
         session_used=used_media_registry,
+        scene_timeline=scene_timeline,
+        cut_duration=cut_duration,
     )
 
     if not photo_assets:
@@ -2516,10 +2518,10 @@ def _render_scene_aligned_general(
     )
     print(f"[Worker-General] 🎞️ {len(cut_segments)} kesmelik görsel master hazırlandı: {raw_visuals.name}")
 
-    # 4. Altın Çerçeveli Glassmorphism Altyazı Motorunu Bağla
+    # 4. Kategoriye Özel Dinamik Altyazı Motorunu Bağla
     from glassmorphism_subtitles import generate_glassmorphism_subtitles
     enable_hook = bool(edit_opts.get("enable_hyperframes_hook", True))
-    hook_badge = edit_opts.get("hyperframes_hook_badge") or "🌍 MUST VISIT"
+    hook_badge = edit_opts.get("hyperframes_hook_badge")  # None ise kanal teması otomatik seçer
 
     sub_concat_txt = generate_glassmorphism_subtitles(
         script=script,

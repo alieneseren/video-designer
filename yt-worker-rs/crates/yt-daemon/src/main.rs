@@ -181,7 +181,7 @@ async fn run_job(job_file: &Path, force_rebuild: bool) -> Result<()> {
     // 4.5. Glassmorphic Subtitles
     let subtitled_visual = workspace_dir.join("subtitled_visual.mp4");
     let py_sub_cmd = format!(
-        "import sys; sys.path.insert(0, '.'); from glassmorphism_subtitles import generate_glassmorphism_subtitles; from pathlib import Path; import json; j = json.load(open('{}')); generate_glassmorphism_subtitles(j.get('script_data') or {{}}, total_dur={:.2}, scratch_dir=Path('{}'), top_badge='🌍 MUST VISIT', category='{}')",
+        "import sys; sys.path.insert(0, '.'); from glassmorphism_subtitles import generate_glassmorphism_subtitles; from pathlib import Path; import json; j = json.load(open('{}')); generate_glassmorphism_subtitles(j.get('script_data') or {{}}, total_dur={:.2}, scratch_dir=Path('{}'), top_badge=None, category='{}')",
         job_file.display(),
         total_video_dur,
         workspace_dir.display(),
