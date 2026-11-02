@@ -2480,6 +2480,34 @@ class VideoGenerator:
             except Exception as hf_err:
                 print(f"[HYPERFRAMES] Kinetik hook eklenirken hata oluştu (video korundu): {hf_err}")
 
+        # 6.8) Otomatik Klon Ses Giydirme (Kanal veya Global Ayarlı RVC Modeli)
+        try:
+            from voice_clone_manager import VoiceCloneManager
+            from channel_manager import ChannelManager
+            ch_cfg_vc = ChannelManager().get_channel(channel_id)
+            target_vc_id = (
+                (ch_cfg_vc.get("voice_clone_id") if ch_cfg_vc else None)
+                or edit_options.get("voice_clone_id")
+            )
+            vcm = VoiceCloneManager()
+            if target_vc_id or vcm.get_active_clone():
+                clean_audio_cand = work_dir / "clean_voiceover.wav"
+                if not clean_audio_cand.exists():
+                    clean_audio_cand = work_dir / f"narration.{audio_ext}"
+                bgm_cand = edit_options.get("bgm_path")
+                bgm_vol = float(edit_options.get("bgm_volume", 0.15) or 0.15)
+                vc_res = vcm.apply_voice_clone_to_video(
+                    video_path=video_path,
+                    clone_id=target_vc_id,
+                    bgm_path=bgm_cand,
+                    bgm_volume=bgm_vol,
+                    clean_audio_path=clean_audio_cand if clean_audio_cand.exists() else None
+                )
+                if vc_res.get("success"):
+                    print(f"[RVC] ✅ Videoya klon ses başarıyla giydirildi: {vc_res.get('clone_name')}")
+        except Exception as vc_hook_err:
+            print(f"[RVC] Klon ses giydirme uyarısı (orijinal ses korundu): {vc_hook_err}")
+
         # 7) Metadata
 
         meta_extra = {

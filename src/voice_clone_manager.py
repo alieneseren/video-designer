@@ -558,9 +558,41 @@ class VoiceCloneManager:
         filigranı ekler ve videoyu YENİDEN KODLAMADAN (-c:v copy) saniyeler içinde birleştirir.
         """
         v_path = Path(video_path).resolve()
+        # Eğer bir klasör verildiyse klasör içindeki video dosyasını otomatik bul
+        if v_path.is_dir():
+            found_v = None
+            for v_name in ["final.mp4", "final_video.mp4", "video.mp4"]:
+                cand = v_path / v_name
+                if cand.is_file() and cand.stat().st_size > 10000:
+                    found_v = cand
+                    break
+            if found_v:
+                v_path = found_v
+            else:
+                logger.error(f"[VoiceCloneManager] Klasörde geçerli video dosyası bulunamadı: {v_path}")
+                return {"success": False, "reason": "no_video_in_dir", "video_path": str(v_path)}
+
         if not v_path.exists() or v_path.stat().st_size < 10000:
             logger.error(f"[VoiceCloneManager] Geçersiz video dosyası: {v_path}")
             return {"success": False, "reason": "invalid_video_file", "video_path": str(v_path)}
+
+        # clone_id belirtilmemişse metadata.json veya klasörden kanal ayarını oku
+        if not clone_id:
+            try:
+                meta_p = v_path.parent / "metadata.json"
+                if meta_p.exists():
+                    m_data = json.loads(meta_p.read_text(encoding="utf-8"))
+                    cid = m_data.get("channel_id")
+                    if cid:
+                        from channel_manager import ChannelManager
+                        ch = ChannelManager().get_channel(cid)
+                        if ch:
+                            clone_id = (
+                                ch.get("voice_clone_id")
+                                or ch.get("edit_options", {}).get("voice_clone_id")
+                            )
+            except Exception as e_cid:
+                logger.debug(f"[VoiceCloneManager] Kanal klon tespiti atlandı: {e_cid}")
 
         reg = self._read_registry()
         target_id = clone_id or reg.get("active_id")
@@ -723,6 +755,29 @@ class VoiceCloneManager:
             shutil.move(str(temp_video_out), str(dest_video))
             elapsed = round(time.perf_counter() - t_start, 2)
             logger.info(f"✅ [VoiceCloneManager] Klon ses ve filigran {elapsed} sn içinde başarıyla giydirildi: {dest_video.name}")
+
+            # 6. Kardeş video dosyalarını senkronize et (video.mp4, final.mp4, final_video.mp4)
+            parent_dir = dest_video.parent
+            for sib_name in ["video.mp4", "final.mp4", "final_video.mp4"]:
+                sib_path = parent_dir / sib_name
+                try:
+                    if sib_path.resolve() != dest_video.resolve():
+                        shutil.copy2(str(dest_video), str(sib_path))
+                except Exception as cp_err:
+                    logger.warning(f"[VoiceCloneManager] Kardeş video senkronizasyon uyarısı ({sib_name}): {cp_err}")
+
+            # 7. metadata.json dosyasını güncelle
+            meta_path = parent_dir / "metadata.json"
+            if meta_path.exists():
+                try:
+                    meta_json = json.loads(meta_path.read_text(encoding="utf-8"))
+                    meta_json["voice_clone_applied"] = True
+                    meta_json["voice_clone_id"] = target_id
+                    meta_json["voice_clone_name"] = clone.get("name", "")
+                    meta_json["watermarked"] = embed_watermark
+                    meta_path.write_text(json.dumps(meta_json, ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception as me:
+                    logger.warning(f"[VoiceCloneManager] metadata.json güncelleme uyarısı: {me}")
 
             return {
                 "success": True,

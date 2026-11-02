@@ -1138,6 +1138,7 @@ print('DELETED')
 
         # 0.1. Kanal Kalite Kontrol (AI QA) Ayarını Kontrol Et
         is_auto_qa = False
+        ch_cfg = None
         try:
             from src.channel_manager import ChannelManager
             cm = ChannelManager()

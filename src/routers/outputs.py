@@ -778,6 +778,8 @@ def get_kontrol_videos():
             if not v_file.exists():
                 v_file = folder / "video.mp4"
             if not v_file.exists():
+                v_file = folder / "final_video.mp4"
+            if not v_file.exists():
                 continue
 
             meta = _parse_metadata(folder)
@@ -786,10 +788,23 @@ def get_kontrol_videos():
                 ip = folder / info_name
                 if ip.exists():
                     try:
-                        extra = json.loads(ip.read_text(encoding="utf-8"))
-                        break
+                        data = json.loads(ip.read_text(encoding="utf-8"))
+                        if isinstance(data, dict):
+                            extra.update(data)
                     except Exception:
                         pass
+
+            # Eğer metadata'da klon adı yoksa kanal ayarlarından çöz
+            ch_clone_id = ch_cfg.get("voice_clone_id") or (ch_cfg.get("edit_options") or {}).get("voice_clone_id")
+            vc_name = extra.get("voice_clone_name")
+            if not vc_name and extra.get("voice_clone_applied") and ch_clone_id:
+                try:
+                    from voice_clone_manager import VoiceCloneManager
+                    c_info = VoiceCloneManager().get_clone(ch_clone_id)
+                    if c_info:
+                        vc_name = c_info.get("name")
+                except Exception:
+                    pass
 
             title = meta.get("title") or extra.get("title") or folder.name
             desc = meta.get("description") or extra.get("description") or ""
@@ -842,7 +857,8 @@ def get_kontrol_videos():
                 "channel_id": ch_id,
                 "channel_name": ch_name,
                 "is_shorts": extra.get("shorts_mode", True) or ("shorts" in folder.name.lower()),
-                "voice_clone_name": extra.get("voice_clone_name")
+                "voice_clone_name": vc_name or extra.get("voice_clone_name"),
+                "voice_clone_applied": bool(extra.get("voice_clone_applied", False))
             })
 
         if videos:
