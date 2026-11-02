@@ -56,7 +56,7 @@ except ImportError:
 
 
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-WIKIMEDIA_USER_AGENT = "VideoCreator/2.0 (https://github.com/alienes/yt-oto-video; contact@alienes.com)"
+WIKIMEDIA_USER_AGENT = "TravelShortsBot/3.1 (https://github.com/alieneseren/video-designer; contact@alieneseren.com) Python-urllib/3.10"
 
 
 def get_pixabay_key() -> str:
@@ -158,6 +158,14 @@ UNWANTED_PHOTO_KEYWORDS = [
     "neon sign", "building sign", "street sign", "highway sign", "traffic sign",
     "facade sign", "commercial sign", "parking", "pancho villa",
     "business sign", "store sign", "shop sign", "retail sign",
+    # Telefon kamera filigranları & tarih damgaları (Redmi, Xiaomi, Mi Note, kamera stamp)
+    "shot on", "mi note", "redmi", "xiaomi", "watermark", "datestamp", "timestamp",
+    "copyright", "alamy", "getty", "stock photo", "shutterstock", "depositphotos",
+    "dreamstime", "istock", "camera model",
+    # Havacılıkta müze balon kapsülleri, tarihi arşiv & siyah-beyaz (Modern uçuş güvenliğinde elenir)
+    "gondola", "capsule", "breitling", "orbiter", "museum display", "museum exhibit",
+    "vintage 19", "black and white", "bw photo", "monochrome", "balloon", "hot air balloon",
+    "glider", "propeller plane", "biplane", "model plane", "toy plane", "miniature",
     # Ofis, masa, plastik bardak, paket yemek, ev yemeği
     "office", "desk", "cubicle", "keyboard", "computer", "laptop",
     "plastic cup", "disposable cup", "paper cup", "water cup", "coffee cup",
@@ -477,6 +485,8 @@ def download_and_format_image(
             "Referer": "https://www.google.com/"
         }
 
+    import time
+    time.sleep(0.3)
     temp_img = output_path + ".tmp.jpg"
     for attempt in range(3):
         try:
@@ -484,20 +494,20 @@ def download_and_format_image(
             with urllib.request.urlopen(req, timeout=15) as resp, open(temp_img, "wb") as f_out:
                 f_out.write(resp.read())
 
-            if not os.path.exists(temp_img) or os.path.getsize(temp_img) < 35000:
+            if not os.path.exists(temp_img) or os.path.getsize(temp_img) < 30000:
                 continue
 
             im = Image.open(temp_img).convert("RGB")
             src_w, src_h = im.size
 
-            # En az 1080px genişlik veya yükseklik olmalı, minimum 1.0MP
-            if (src_w < 1080 and src_h < 1080) or (src_w * src_h < 1_000_000):
+            # En az 1000px genişlik veya yükseklik olmalı, minimum 0.8MP
+            if (src_w < 1000 and src_h < 1000) or (src_w * src_h < 800_000):
                 continue
 
-            # Ham görsel bulanıklık filtresi (Laplacian variance >= 85.0)
+            # Ham görsel bulanıklık filtresi (Laplacian variance >= 32.0; gerçek 240p bulanıklığı elenir, gece/atmosfer korunur)
             sharpness_raw = calculate_sharpness(im)
-            if sharpness_raw < 85.0:
-                print(f"[REAL-FETCHER] ⚠️ Düşük netlik/bulanık ham görsel elendi (sharpness={sharpness_raw:.1f} < 85): {img_url[:60]}")
+            if sharpness_raw < 32.0:
+                print(f"[REAL-FETCHER] ⚠️ Düşük netlik/bulanık ham görsel elendi (sharpness={sharpness_raw:.1f} < 32): {img_url[:60]}")
                 continue
 
             # Hedef oranı dolduracak şekilde boyutlandır (Ken Burns için pay bırakarak)
@@ -513,15 +523,20 @@ def download_and_format_image(
             bottom = top + target_h
             im_cropped = im_resized.crop((left, top, right, bottom))
 
-            # Dikey 9:16 kırpım alanı netlik denetimi (Özellikle 240p/crop sonrası piksellenmeyi kesin engeller)
+            # Dikey 9:16 kırpım alanı netlik denetimi (240p ve aşırı bulanık crop'ları eler)
             sharpness_crop = calculate_sharpness(im_cropped)
-            if sharpness_crop < 85.0:
-                print(f"[REAL-FETCHER] ⚠️ Dikey 9:16 kırpım sonrası düşük netlik elendi (sharpness={sharpness_crop:.1f} < 85): {img_url[:60]}")
+            if sharpness_crop < 32.0:
+                print(f"[REAL-FETCHER] ⚠️ Dikey 9:16 kırpım sonrası düşük netlik elendi (sharpness={sharpness_crop:.1f} < 32): {img_url[:60]}")
                 continue
 
             im_cropped.save(output_path, "JPEG", quality=92)
             if os.path.exists(output_path) and os.path.getsize(output_path) > 10000:
                 return True
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                time.sleep(2.0)
+            elif attempt == 2:
+                print(f"[REAL-FETCHER] Görsel indirme HTTP hatası ({img_url[:60]}...): {e}")
         except Exception as e:
             if attempt == 2:
                 print(f"[REAL-FETCHER] Görsel formatlama hatası ({img_url[:60]}...): {e}")
@@ -1015,9 +1030,99 @@ def fetch_photo_pool(
 
         scene_queries: List[Dict[str, str]] = []
 
-        # A) YEMEK & SOKAK LEZZETİ (TRAVEL / FOOD)
-        if any(f in combined for f in ["food", "taco", "pad thai", "al pastor", "carnitas", "street food", "market", "chinatown", "wok", "cauldron", "prawn", "salsa", "chili"]):
-            # 0. SCENE 0: HOOK / GİRİŞ ESTABLISHING (İki dev şehir, 8000 mil, showdown - ASLA tekil tabak yok, sadece geniş açı gece şehirleri)
+        # A) HAVACILIK & UÇAK KABİNİ (Aviation / Flight Safety) - ÖNCELİKLİ KONTROL
+        if any(w in combined for w in ["airplane", "airline", "aircraft", "cockpit", "flight", "cabin", "landing", "runway", "plane", "aviation", "evacuate", "takeoff"]):
+            if any(w in scene_corpus for w in ["dim", "cabin", "aisle", "light", "interior", "descend", "dark"]):
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "airplane cabin interior night"},
+                    {"source": "wikimedia", "query": "aircraft cabin passenger seats"},
+                    {"source": "wikimedia", "query": "commercial airplane cabin interior"},
+                    {"source": "pixabay_photo", "query": "airplane cabin night"},
+                    {"source": "pixabay_photo", "query": "airplane cabin interior"},
+                    {"source": "pixabay_photo", "query": "aircraft cabin passenger"}
+                ])
+            elif any(w in scene_corpus for w in ["takeoff", "landing", "wing", "engine", "runway", "window"]):
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "airplane window night wing"},
+                    {"source": "wikimedia", "query": "cockpit night landing runway"},
+                    {"source": "wikimedia", "query": "airport runway night"},
+                    {"source": "pixabay_photo", "query": "airplane runway lights night"},
+                    {"source": "pixabay_photo", "query": "airplane wing sunset flying"},
+                    {"source": "pixabay_photo", "query": "airplane takeoff night"}
+                ])
+            elif any(w in scene_corpus for w in ["eye", "vision", "adapt", "pupil"]):
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "human eye pupil close up"},
+                    {"source": "wikimedia", "query": "airplane emergency lighting cabin"},
+                    {"source": "pixabay_photo", "query": "eye pupil macro close up"},
+                    {"source": "pixabay_photo", "query": "airplane cabin dark night"}
+                ])
+            elif any(w in scene_corpus for w in ["evacuate", "emergency", "exit", "escape", "obstacle", "slide"]):
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "airplane emergency exit lights cabin"},
+                    {"source": "wikimedia", "query": "aircraft passenger emergency door"},
+                    {"source": "pixabay_photo", "query": "airplane emergency lighting"},
+                    {"source": "pixabay_photo", "query": "airplane cabin dark aisle"}
+                ])
+            elif any(w in scene_corpus for w in ["attendant", "crew", "overhead", "passenger", "procedure"]):
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "flight attendant cabin aircraft"},
+                    {"source": "wikimedia", "query": "passenger aircraft cabin aisle"},
+                    {"source": "pixabay_photo", "query": "flight attendant airplane interior"},
+                    {"source": "pixabay_photo", "query": "air hostess cabin service"}
+                ])
+            else:
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "airplane cabin interior night"},
+                    {"source": "pixabay_photo", "query": "airplane window night wing"},
+                    {"source": "wikimedia", "query": "cockpit night landing runway"},
+                    {"source": "pixabay_photo", "query": "airplane flight night"}
+                ])
+
+        # B) LÜKS SEYAHAT, RESORT & VİLLA (5 Countries / Budget Luxury)
+        elif any(w in combined for w in ["live like royalty", "50/day", "fifty dollars", "resort", "resorts", "luxury", "villa", "bali", "vietnam", "sri lanka", "budget"]):
+            if sc_idx == 0 or any(w in scene_corpus for w in ["infinity pool", "routine", "fifty dollars", "paradise", "five-star"]):
+                scene_queries.extend([
+                    {"source": "pixabay_photo", "query": "infinity pool tropical resort luxury"},
+                    {"source": "wikimedia", "query": "infinity pool tropical resort"},
+                    {"source": "pixabay_photo", "query": "luxury resort swimming pool tropical"},
+                    {"source": "pixabay_photo", "query": "luxury villa pool tropical"},
+                    {"source": "wikimedia", "query": "tropical resort pool luxury"}
+                ])
+            elif any(w in scene_corpus for w in ["bali", "vietnam", "villa", "carved", "massage"]):
+                scene_queries.extend([
+                    {"source": "pixabay_photo", "query": "bali luxury resort villa pool"},
+                    {"source": "wikimedia", "query": "bali luxury villa pool"},
+                    {"source": "pixabay_photo", "query": "traditional spa herbal massage therapy"},
+                    {"source": "pixabay_photo", "query": "vietnam tropical resort beach"},
+                    {"source": "pixabay_photo", "query": "ubud bali luxury resort"}
+                ])
+            elif any(w in scene_corpus for w in ["thailand", "sri lanka", "balcony", "palm", "plantation", "colonial"]):
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "sri lanka tropical resort beach"},
+                    {"source": "pixabay_photo", "query": "sri lanka palm beach resort"},
+                    {"source": "pixabay_photo", "query": "thailand luxury resort ocean view"},
+                    {"source": "pixabay_photo", "query": "phuket luxury resort balcony sea"},
+                    {"source": "wikimedia", "query": "sri lanka tea plantation hillside"}
+                ])
+            elif any(w in scene_corpus for w in ["dining", "hospitality", "beachfront", "pennies", "seafood"]):
+                scene_queries.extend([
+                    {"source": "pixabay_photo", "query": "luxury beachfront dining table sunset"},
+                    {"source": "pixabay_photo", "query": "tropical resort beachfront restaurant dinner"},
+                    {"source": "wikimedia", "query": "beachfront restaurant luxury tropical"},
+                    {"source": "pixabay_photo", "query": "candlelight beach dinner tropical"}
+                ])
+            else:
+                scene_queries.extend([
+                    {"source": "pixabay_photo", "query": "tropical resort sunset panorama traveler"},
+                    {"source": "pixabay_photo", "query": "luxury travel destination tropical viewpoint"},
+                    {"source": "wikimedia", "query": "tropical beach resort sunset landscape"},
+                    {"source": "pixabay_photo", "query": "wooden deck ocean sunset traveler"}
+                ])
+
+        # C) BANGKOK VS MEXICO CITY SOKAK LEZZETLERİ (Yalnızca bu konuya özel)
+        elif ("bangkok" in topic and "mexico" in topic) or any(w in topic for w in ["pad thai", "al pastor", "carnitas", "yaowarat"]):
+            # 0. SCENE 0: HOOK / GİRİŞ ESTABLISHING (İki dev şehir, 8000 mil, showdown)
             if sc_idx == 0 or any(h_word in scene_corpus for h_word in ["eight thousand miles", "8000 miles", "two legendary", "ultimate clash", "crown of the world", "showdown"]):
                 scene_queries.extend([
                     {"source": "wikimedia", "query": "yaowarat road bangkok night"},
@@ -1042,7 +1147,7 @@ def fetch_photo_pool(
                     {"source": "wikimedia", "query": "thai street food wok"},
                     {"source": "wikimedia", "query": "bangkok street food night"},
                     {"source": "wikimedia", "query": "bangkok night market street food"},
-                    {"source": "wikimedia", "query": "pad thai shrimp"},  # en fazla 1 adet servis tabağı
+                    {"source": "wikimedia", "query": "pad thai shrimp"},
                     {"source": "pixabay_photo", "query": "bangkok street food wok flame"}
                 ])
             # 2. SCENE 2: MEXICO CITY / AL PASTOR / TENDER PORK / ROASTED PINEAPPLE / SALSAS
@@ -1055,7 +1160,7 @@ def fetch_photo_pool(
                     {"source": "wikimedia", "query": "carnitas tacos"}
                 ])
             # 4. SCENE 4: SHOWDOWN / THAI CHILIES / SMOKY ADOBO / CLOSING CHOICE
-            elif any(o_word in scene_corpus for o_word in ["chili", "adobo", "pick", "life", "rest", "which would you"]):
+            else:
                 scene_queries.extend([
                     {"source": "wikimedia", "query": "thai street food night market"},
                     {"source": "wikimedia", "query": "mexican street tacos"},
@@ -1063,95 +1168,9 @@ def fetch_photo_pool(
                     {"source": "wikimedia", "query": "bangkok night market street food"},
                     {"source": "pixabay_photo", "query": "street food night market"}
                 ])
-            # GENEL TRAVEL FOOD
-            else:
-                scene_queries.extend([
-                    {"source": "wikimedia", "query": "bangkok street food night"},
-                    {"source": "wikimedia", "query": "mexico street food market"},
-                    {"source": "wikimedia", "query": "tacos al pastor trompo"},
-                    {"source": "wikimedia", "query": "thai street food wok"}
-                ])
-
-        # B) HAVACILIK & UÇAK KABİNİ (Aviation / Flight)
-        elif any(w in combined for w in ["airplane", "airline", "aircraft", "cockpit", "flight", "cabin", "landing", "runway", "plane", "aviation"]):
-            if any(w in scene_corpus for w in ["dim", "cabin", "aisle", "light", "interior", "descend"]):
-                scene_queries.extend([
-                    {"source": "wikimedia", "query": "airplane cabin interior night"},
-                    {"source": "pixabay_photo", "query": "airplane cabin night"},
-                    {"source": "wikimedia", "query": "aircraft cabin passenger seats"},
-                    {"source": "pixabay_photo", "query": "airplane cabin interior"},
-                    {"source": "pixabay_photo", "query": "aircraft cabin passenger"}
-                ])
-            elif any(w in scene_corpus for w in ["takeoff", "landing", "wing", "engine", "runway", "window"]):
-                scene_queries.extend([
-                    {"source": "wikimedia", "query": "airplane window night wing"},
-                    {"source": "wikimedia", "query": "cockpit night landing runway"},
-                    {"source": "pixabay_photo", "query": "airplane runway lights night"},
-                    {"source": "pixabay_photo", "query": "airplane wing sunset flying"},
-                    {"source": "wikimedia", "query": "airport runway night"}
-                ])
-            elif any(w in scene_corpus for w in ["eye", "vision", "adapt", "pupil", "dark", "evacuate", "emergency", "exit"]):
-                scene_queries.extend([
-                    {"source": "wikimedia", "query": "airplane emergency exit lights cabin"},
-                    {"source": "pixabay_photo", "query": "airplane cabin dark night"},
-                    {"source": "wikimedia", "query": "airplane cabin interior night"},
-                    {"source": "pixabay_photo", "query": "airplane emergency lighting"}
-                ])
-            elif any(w in scene_corpus for w in ["attendant", "crew", "overhead", "passenger"]):
-                scene_queries.extend([
-                    {"source": "wikimedia", "query": "flight attendant cabin aircraft"},
-                    {"source": "pixabay_photo", "query": "flight attendant airplane interior"},
-                    {"source": "pixabay_photo", "query": "air hostess cabin service"},
-                    {"source": "wikimedia", "query": "passenger aircraft cabin"}
-                ])
-            else:
-                scene_queries.extend([
-                    {"source": "wikimedia", "query": "airplane cabin interior night"},
-                    {"source": "pixabay_photo", "query": "airplane window night wing"},
-                    {"source": "wikimedia", "query": "cockpit night landing runway"},
-                    {"source": "pixabay_photo", "query": "airplane flight sunset"}
-                ])
-
-        # C) LÜKS SEYAHAT, RESORT & VİLLA (5 Countries / Budget Luxury)
-        elif any(w in combined for w in ["live like royalty", "50/day", "fifty dollars", "resort", "resorts", "luxury", "villa", "bali", "vietnam", "thailand", "sri lanka", "budget"]):
-            if sc_idx == 0 or any(w in scene_corpus for w in ["infinity pool", "dinner", "routine", "fifty dollars"]):
-                scene_queries.extend([
-                    {"source": "pixabay_photo", "query": "infinity pool tropical resort luxury"},
-                    {"source": "wikimedia", "query": "infinity pool tropical resort"},
-                    {"source": "pixabay_photo", "query": "luxury resort swimming pool tropical"},
-                    {"source": "pixabay_photo", "query": "luxury villa pool tropical"}
-                ])
-            elif any(w in scene_corpus for w in ["bali", "vietnam", "villa", "carved"]):
-                scene_queries.extend([
-                    {"source": "pixabay_photo", "query": "bali luxury resort villa pool"},
-                    {"source": "pixabay_photo", "query": "vietnam tropical resort beach"},
-                    {"source": "wikimedia", "query": "bali luxury villa pool"},
-                    {"source": "pixabay_photo", "query": "ubud bali luxury villa"}
-                ])
-            elif any(w in scene_corpus for w in ["thailand", "sri lanka", "balcony", "palm"]):
-                scene_queries.extend([
-                    {"source": "wikimedia", "query": "sri lanka tropical resort beach"},
-                    {"source": "pixabay_photo", "query": "thailand luxury resort ocean view"},
-                    {"source": "pixabay_photo", "query": "phuket luxury resort balcony sea"},
-                    {"source": "pixabay_photo", "query": "tropical resort ocean balcony"}
-                ])
-            elif any(w in scene_corpus for w in ["dining", "hospitality", "beachfront", "pennies"]):
-                scene_queries.extend([
-                    {"source": "pixabay_photo", "query": "luxury beachfront dining table sunset"},
-                    {"source": "pixabay_photo", "query": "tropical resort beachfront restaurant dinner"},
-                    {"source": "wikimedia", "query": "beachfront restaurant luxury tropical"},
-                    {"source": "pixabay_photo", "query": "candlelight beach dinner tropical"}
-                ])
-            else:
-                scene_queries.extend([
-                    {"source": "pixabay_photo", "query": "tropical resort sunset panorama traveler"},
-                    {"source": "pixabay_photo", "query": "luxury travel destination tropical viewpoint"},
-                    {"source": "wikimedia", "query": "tropical beach resort sunset landscape"},
-                    {"source": "pixabay_photo", "query": "infinity pool tropical resort sunset"}
-                ])
 
         # D) DAĞLAR, TRENLER & DOĞA (Mountains / Scenic Trains)
-        elif any(w in combined for w in ["mountain", "alps", "train", "railway", "cliff", "switzerland", "incline", "cogwheel"]):
+        elif any(w in combined for w in ["mountain", "alps", "train", "railway", "cliff", "switzerland", "incline", "cogwheel", "steepest"]):
             scene_queries.extend([
                 {"source": "wikimedia", "query": "pilatus railway switzerland"},
                 {"source": "wikimedia", "query": "matterhorn zermatt switzerland"},
@@ -1182,14 +1201,18 @@ def fetch_photo_pool(
                     {"source": "pixabay_photo", "query": "basketball player arena action"}
                 ])
 
-        # C) TARİH, HAVACILIK, BİLİM, VB.
+        # F) DİĞER TÜM KONULAR (Evrensel Prompt Çıkarıcı - Asla Bangkok/Mexico/Paris enjekte etmez)
         else:
-            clean_p = re.sub(r"\b(8k|cinematic|photorealistic|hyperrealistic|masterpiece)\b", "", prompt).strip()
+            clean_p = re.sub(r"\b(8k|cinematic|photorealistic|hyperrealistic|masterpiece)\b", "", prompt, flags=re.IGNORECASE).strip()
+            clean_p = re.sub(r"[^\w\s-]", " ", clean_p).strip()
+            clean_p = re.sub(r"\s+", " ", clean_p)
+            words = clean_p.split()
+            short_q = " ".join(words[:4]) if words else topic
             scene_queries.extend([
-                {"source": "wikimedia", "query": f"{clean_p[:40]} {topic[:25]}"},
-                {"source": "pixabay_photo", "query": f"{clean_p[:35]}"},
-                {"source": "wikimedia", "query": f"{topic} history"},
-                {"source": "pixabay_photo", "query": f"{topic} documentary"}
+                {"source": "wikimedia", "query": short_q},
+                {"source": "pixabay_photo", "query": short_q},
+                {"source": "wikimedia", "query": f"{topic[:30]}"},
+                {"source": "pixabay_photo", "query": f"{topic[:30]}"}
             ])
 
         # Sahneye ait fotoğrafları Round-Robin yöntemiyle (her sorgudan en fazla 1 adet) indir ve algısal dHash ile tekilleştir
@@ -1245,7 +1268,99 @@ def fetch_photo_pool(
                 # Her sorgudan en fazla 1 görsel al ve bir sonraki farklı sorguya geç
                 break
 
-    # 4. Zaman Çizgisi Senkronizasyonu ile Kesme Listesini Oluştur (Tamamen Benzersiz Görseller)
+    # ── 3.5 POOL QUOTA BARRIER (HAVUZ KOTA VE BENZERSİZLİK BARAJI) ──
+    # Toplam indirilen benzersiz fotoğraf sayısı hedef kesme sayısından (target_count) az ise,
+    # ASLA DÖNGÜYE GİRME / FOTOĞRAFLARI TEKRARLAMA!
+    # Bunun yerine ek genişletilmiş semantik sorgularla havuz target_count sayısına ulaşana kadar aranır.
+    if len(all_downloaded_photos) < target_count:
+        needed_extra = target_count - len(all_downloaded_photos)
+        print(f"[PHOTO-POOL] ⚠️ Havuz kotası eksik ({len(all_downloaded_photos)}/{target_count}, +{needed_extra} gerekli). Ek genişletilmiş semantik arama başlatılıyor...")
+        
+        fallback_queries: List[Dict[str, str]] = []
+        is_aviation = any(w in topic.lower() for w in ["airplane", "airline", "aircraft", "cockpit", "flight", "cabin", "aviation"])
+        is_luxury = any(w in topic.lower() for w in ["royalty", "50", "luxury", "villa", "resort", "hotel"])
+
+        if is_aviation:
+            fallback_queries.extend([
+                {"source": "wikimedia", "query": "commercial aircraft cabin night"},
+                {"source": "pixabay_photo", "query": "airplane cabin interior seats"},
+                {"source": "wikimedia", "query": "airplane interior dark night"},
+                {"source": "pixabay_photo", "query": "aircraft cabin passenger seats"},
+                {"source": "wikimedia", "query": "cockpit aircraft dashboard night"},
+                {"source": "pixabay_photo", "query": "airplane flying sunset sky"},
+                {"source": "wikimedia", "query": "airport runway lights night"},
+                {"source": "pixabay_photo", "query": "airplane window cloud view"}
+            ])
+        elif is_luxury:
+            fallback_queries.extend([
+                {"source": "pixabay_photo", "query": "luxury villa infinity pool tropical"},
+                {"source": "wikimedia", "query": "tropical beach resort sunset"},
+                {"source": "pixabay_photo", "query": "luxury resort hotel bedroom suite"},
+                {"source": "pixabay_photo", "query": "tropical island palm beach"},
+                {"source": "wikimedia", "query": "bali luxury resort tropical"},
+                {"source": "pixabay_photo", "query": "luxury beachfront villa sunset"},
+                {"source": "wikimedia", "query": "sri lanka beach palm resort"},
+                {"source": "pixabay_photo", "query": "tropical resort pool landscape"}
+            ])
+        else:
+            for sc in scenes:
+                s_narr = sc.get("narration") or ""
+                s_prompt = sc.get("image_prompt") or ""
+                clean_s = re.sub(r"\b(8k|cinematic|photorealistic|hyperrealistic|masterpiece)\b", "", f"{s_narr} {s_prompt}", flags=re.IGNORECASE).strip()
+                tokens = [t for t in re.sub(r"[^\w\s]", "", clean_s).split() if len(t) > 3 and t.lower() not in UNWANTED_PHOTO_KEYWORDS]
+                if len(tokens) >= 2:
+                    q_phrase = " ".join(tokens[:3])
+                    fallback_queries.append({"source": "pixabay_photo", "query": q_phrase})
+                    fallback_queries.append({"source": "wikimedia", "query": q_phrase})
+
+        fb_idx = 0
+        max_fb_attempts = max(24, len(fallback_queries) * 4)
+        while len(all_downloaded_photos) < target_count and fb_idx < max_fb_attempts and fallback_queries:
+            q_item = fallback_queries[fb_idx % len(fallback_queries)]
+            fb_idx += 1
+            src = q_item["source"]
+            q_str = q_item["query"]
+            
+            cand_list = []
+            if src == "wikimedia":
+                cand_list = search_wikimedia_commons_photos(q_str, exclude_urls=used.union(downloaded_urls), limit=4)
+            elif src == "pixabay_photo":
+                cand_list = search_pixabay_photos(q_str, exclude_ids=used.union(downloaded_urls), limit=4)
+
+            for cand in cand_list:
+                if len(all_downloaded_photos) >= target_count:
+                    break
+                c_url = cand.get("url")
+                if not c_url or c_url in downloaded_urls or c_url in used:
+                    continue
+
+                photo_p = pool_dir / f"extra_quota_photo_{len(all_downloaded_photos):02d}.jpg"
+                ok = download_and_format_image(c_url, str(photo_p), target_w, target_h)
+                if not ok or not photo_p.is_file() or photo_p.stat().st_size <= 10000:
+                    continue
+
+                try:
+                    cand_im = Image.open(photo_p).convert("RGB")
+                    cand_hash = calculate_dhash(cand_im)
+                    if any(hamming_distance(cand_hash, prev_h) < 14 for prev_h in accepted_video_hashes):
+                        if photo_p.is_file():
+                            photo_p.unlink()
+                        continue
+
+                    enh_im = ImageEnhance.Contrast(cand_im).enhance(1.06)
+                    enh_im = ImageEnhance.Color(enh_im).enhance(1.10)
+                    enh_im.save(photo_p, "JPEG", quality=92)
+                    accepted_video_hashes.append(cand_hash)
+                except Exception:
+                    pass
+
+                all_downloaded_photos.append(photo_p)
+                downloaded_urls.add(c_url)
+                used.add(c_url)
+                print(f"[PHOTO-POOL] ➕ Ek kota editoryal görseli bağlandı ({len(all_downloaded_photos)}/{target_count}): {photo_p.name} [{src}: '{q_str}']")
+                break
+
+    # 4. Zaman Çizgisi Senkronizasyonu ile Kesme Listesini Oluştur (%100 Benzersiz)
     final_cut_photos: List[Path] = []
     used_cut_photo_paths: Set[Path] = set()
 
@@ -1256,14 +1371,13 @@ def fetch_photo_pool(
         if sc_pool:
             chosen = sc_pool[0]
         else:
-            # Bu sahnede kullanılmamış görsel kalmadıysa, tüm indirilen fotoğraflardan boşta olanı al
-            global_pool = [p for p in all_downloaded_photos if p not in used_cut_photo_paths]
-            if global_pool:
-                chosen = global_pool[0]
+            # Sahne havuzu bittiyse, genel indirilmiş havuzdan henüz KULLANILMAMIŞ bir fotoğraf seç
+            unused_global = [p for p in all_downloaded_photos if p not in used_cut_photo_paths]
+            if unused_global:
+                chosen = unused_global[0]
             else:
-                # Tüm havuz bittiyse emniyet görseli
-                all_candidates = scene_photos.get(assigned_sc) or all_downloaded_photos
-                chosen = all_candidates[cut_i % len(all_candidates)] if all_candidates else (pool_dir / f"failsafe_{cut_i:03d}.jpg")
+                # Emniyet: havuz biterse bile failsafe benzersiz dosya üretilir ama ASLA eski kesmeler tekrarlanmaz!
+                chosen = pool_dir / f"unique_failsafe_{cut_i:03d}.jpg"
                 if not chosen.is_file():
                     Image.new("RGB", (target_w, target_h), (24, 24, 27)).save(chosen, "JPEG")
         

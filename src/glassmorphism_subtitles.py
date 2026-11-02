@@ -88,7 +88,7 @@ THEMES: Dict[str, ChannelSubtitleTheme] = {
         badge_border=(52, 211, 153, 235),
         badge_text_color="#fde047",
         badge_radius=20,
-        default_badge="MUST VISIT | LETSTRAVEII",
+        default_badge="TRAVEL GUIDE | LETSTRAVEII",
         highlights={
             "PAD THAI", "TACOS", "PASTOR", "CARNITAS", "CHINATOWN", "BANGKOK",
             "MEXICO", "TOKYO", "PARIS", "FOOD", "CHEF", "STREET", "RECIPE",
@@ -630,8 +630,20 @@ def generate_glassmorphism_subtitles(
     scratch_dir = Path(scratch_dir)
     theme = get_channel_theme(category)
 
-    # Eğer özel bir üst kanca rozeti girilmemişse kanal temasının varsayılan rozetini kullan
-    effective_top_badge = top_badge if top_badge else theme.default_badge
+    # Konuya ve kanala duyarlı dinamik üst rozet (Top Header Bug) belirleme
+    effective_top_badge = top_badge
+    if not effective_top_badge:
+        topic_corpus = f"{script.get('title', '')} {script.get('topic', '')} {category}".lower()
+        if any(w in topic_corpus for w in ["airplane", "airline", "aircraft", "cockpit", "flight", "cabin", "landing", "aviation"]):
+            effective_top_badge = "AVIATION SECRETS"
+        elif any(w in topic_corpus for w in ["live like royalty", "50/day", "luxury", "villa", "budget luxury"]):
+            effective_top_badge = "BUDGET LUXURY GUIDE"
+        elif any(w in topic_corpus for w in ["street food", "food", "tacos", "pad thai", "culinary", "bangkok vs"]):
+            effective_top_badge = "STREET FOOD SHOWDOWN"
+        elif any(w in topic_corpus for w in ["train", "railway", "alps", "mountain", "steepest"]):
+            effective_top_badge = "SCENIC EXPEDITIONS"
+        else:
+            effective_top_badge = theme.default_badge
 
     scenes = script.get("scenes", [])
     raw_texts = []
@@ -694,13 +706,11 @@ def generate_glassmorphism_subtitles(
         final_card_dur = max(2.20, round(total_dur - running_sum, 3))
         card_durations.append(final_card_dur)
 
-    # Üst Kanca Rozetini İlk 4.5 sn boyunca göster
-    badge_cutoff_time = 4.5
+    # Üst rozet yayın standardı olarak kartlar boyunca tutarlı kalır (aniden yok olma glitch'i önlendi)
     accumulated_time = 0.0
-
     for idx, cdata in enumerate(cards_data):
         dur = card_durations[idx]
-        show_badge = effective_top_badge if accumulated_time < badge_cutoff_time else None
+        show_badge = effective_top_badge
 
         card_img = render_glassmorphic_card(
             cdata["lines"],

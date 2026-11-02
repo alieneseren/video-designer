@@ -544,41 +544,56 @@ def apply_social_cta_overlay(
         return False
 
     # Overlay zamanlama formülü:
-    # 1. Başlangıç penceresi: 3.0s ile 7.5s arası (4.5s)
-    # 2. Bitiş penceresi: (dur - 5.5s) ile (dur - 1.0s) arası (4.5s)
-    windows = []
-    if show_at_start and dur >= 10.0:
-        windows.append("between(t,3.0,7.5)")
-    if show_at_end and dur >= 15.0:
-        end_start = max(8.0, dur - 5.5)
-        end_finish = dur - 1.0
-        windows.append(f"between(t,{end_start:.2f},{end_finish:.2f})")
-
-    if not windows:
-        windows.append("between(t,2.0,6.5)")
-
-    enable_expr = "+".join(windows)
-
-    # Geçici dosya güvenliği (girdi ve çıktı aynı dosya ise)
+    # Sonda (Videonun bitimine 5.5 sn kala) tek seferlik pürüzsüz animasyon
+    # NOT: -stream_loop -1 kullanılmaz; setpts ile tam end_start anından başlatılır (çift sıçramayı / double-bounce önler)
     tmp_out = out_p if in_p != out_p else out_p.parent / f"_cta_tmp_{out_p.name}"
 
-    filter_complex = f"[0:v][1:v]overlay=x=0:y=0:enable='{enable_expr}':eof_action=pass[outv]"
-
-    cmd = [
-        "ffmpeg", "-y",
-        "-i", str(in_p),
-        "-stream_loop", "-1", "-i", str(cta_clip),
-        "-filter_complex", filter_complex,
-        "-map", "[outv]",
-        "-map", "0:a?",
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "19",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "copy",
-        "-t", f"{dur:.3f}",
-        str(tmp_out)
-    ]
+    if show_at_end and not show_at_start:
+        end_start = max(6.0, dur - 5.5)
+        filter_complex = f"[1:v]setpts=PTS-STARTPTS+{end_start:.3f}/TB[ctav];[0:v][ctav]overlay=x=0:y=0:enable='gte(t,{end_start:.3f})':eof_action=pass[outv]"
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(in_p),
+            "-i", str(cta_clip),
+            "-filter_complex", filter_complex,
+            "-map", "[outv]",
+            "-map", "0:a?",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "19",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "copy",
+            "-t", f"{dur:.3f}",
+            str(tmp_out)
+        ]
+        enable_expr = f"gte(t,{end_start:.2f}) [one-shot]"
+    else:
+        windows = []
+        if show_at_start and dur >= 10.0:
+            windows.append("between(t,3.0,7.5)")
+        if show_at_end and dur >= 15.0:
+            end_start = max(8.0, dur - 5.5)
+            end_finish = dur - 1.0
+            windows.append(f"between(t,{end_start:.2f},{end_finish:.2f})")
+        if not windows:
+            windows.append("between(t,2.0,6.5)")
+        enable_expr = "+".join(windows)
+        filter_complex = f"[0:v][1:v]overlay=x=0:y=0:enable='{enable_expr}':eof_action=pass[outv]"
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(in_p),
+            "-stream_loop", "-1", "-i", str(cta_clip),
+            "-filter_complex", filter_complex,
+            "-map", "[outv]",
+            "-map", "0:a?",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-crf", "19",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "copy",
+            "-t", f"{dur:.3f}",
+            str(tmp_out)
+        ]
 
     print(f"[SOCIAL-CTA] 🚀 Video üzerine CTA katmanı giydiriliyor ({enable_expr})...")
     res = subprocess.run(cmd, capture_output=True, text=True)
