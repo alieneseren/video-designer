@@ -1314,7 +1314,15 @@ def fetch_photo_pool(
                 {"source": "wikimedia", "query": "cockpit aircraft dashboard night"},
                 {"source": "pixabay_photo", "query": "airplane flying sunset sky"},
                 {"source": "wikimedia", "query": "airport runway lights night"},
-                {"source": "pixabay_photo", "query": "airplane window cloud view"}
+                {"source": "pixabay_photo", "query": "airplane window cloud view"},
+                {"source": "pixabay_photo", "query": "aircraft landing night runway lights"},
+                {"source": "wikimedia", "query": "airliner passenger seats cabin"},
+                {"source": "pixabay_photo", "query": "airplane pilot cockpit view night"},
+                {"source": "wikimedia", "query": "airplane night flight approach"},
+                {"source": "pixabay_photo", "query": "jet airplane wing evening twilight"},
+                {"source": "wikimedia", "query": "aircraft interior cabin aisle seats"},
+                {"source": "pixabay_photo", "query": "airplane landing gear night airport"},
+                {"source": "wikimedia", "query": "airplane travel airport departure night"}
             ])
         elif is_luxury:
             fallback_queries.extend([
@@ -1339,7 +1347,7 @@ def fetch_photo_pool(
                     fallback_queries.append({"source": "wikimedia", "query": q_phrase})
 
         fb_idx = 0
-        max_fb_attempts = max(24, len(fallback_queries) * 4)
+        max_fb_attempts = max(40, len(fallback_queries) * 6)
         while len(all_downloaded_photos) < target_count and fb_idx < max_fb_attempts and fallback_queries:
             q_item = fallback_queries[fb_idx % len(fallback_queries)]
             fb_idx += 1
@@ -1406,8 +1414,13 @@ def fetch_photo_pool(
             unused_global = [p for p in all_downloaded_photos if p not in used_cut_photo_paths]
             if unused_global:
                 chosen = unused_global[0]
+            elif all_downloaded_photos:
+                # Emniyet: Tüm benzersizler kullanıldıysa en az kullanılan gerçek görseli bağla (ASLA gri boş kutu basma!)
+                from collections import Counter
+                usage_counts = Counter(final_cut_photos)
+                chosen = min(all_downloaded_photos, key=lambda p: usage_counts[p])
             else:
-                # Emniyet: havuz biterse bile failsafe benzersiz dosya üretilir ama ASLA eski kesmeler tekrarlanmaz!
+                # Son Çare Failsafe
                 chosen = pool_dir / f"unique_failsafe_{cut_i:03d}.jpg"
                 if not chosen.is_file():
                     Image.new("RGB", (target_w, target_h), (24, 24, 27)).save(chosen, "JPEG")
