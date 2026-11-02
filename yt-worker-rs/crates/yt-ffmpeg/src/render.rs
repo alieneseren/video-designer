@@ -75,6 +75,40 @@ impl FfmpegRenderer {
         Ok(())
     }
 
+    /// Overlays glassmorphic subtitle cards onto the visual track.
+    pub async fn overlay_glass_subtitles<P1: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
+        &self,
+        visual_path: P1,
+        concat_txt: P2,
+        output_path: P3,
+    ) -> yt_core::Result<()> {
+        let status = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-i", visual_path.as_ref().to_str().unwrap_or(""),
+                "-f", "concat",
+                "-safe", "0",
+                "-i", concat_txt.as_ref().to_str().unwrap_or(""),
+                "-filter_complex", "[0:v][1:v]overlay=0:0:eof_action=pass[v]",
+                "-map", "[v]",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "20",
+                "-pix_fmt", "yuv420p",
+                output_path.as_ref().to_str().unwrap_or(""),
+            ])
+            .output()
+            .await
+            .map_err(|e| yt_core::WorkerError::Ffmpeg(e.to_string()))?;
+
+        if !status.status.success() {
+            let err = String::from_utf8_lossy(&status.stderr);
+            return Err(yt_core::WorkerError::Ffmpeg(err.into()));
+        }
+
+        Ok(())
+    }
+
     /// Muxes final audio (voiceover + bgm) and video into master video.
     pub async fn finalize_video<P1: AsRef<Path>, P2: AsRef<Path>, P3: AsRef<Path>>(
         &self,

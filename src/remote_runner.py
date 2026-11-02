@@ -1168,9 +1168,9 @@ print('DELETED')
             if not ok or not dest_video.exists() or dest_video.stat().st_size < 100000:
                 raise RuntimeError(f"Video sunucudan indirilemedi veya geçersiz boyutta ({channel_id}/{job_id}).")
 
-            # 2. Metadata, altyazı ve video_info dosyalarını indir (BGM ve kanal bilgilerini içerir)
+            # 2. Metadata, altyazı, saf dış ses ve video_info dosyalarını indir (BGM ve kanal bilgilerini içerir)
             meta_data = {}
-            for meta_name in ["metadata.json", "video_info.json", "subtitles.srt", "youtube_chapters.txt"]:
+            for meta_name in ["metadata.json", "video_info.json", "clean_voiceover.wav", "subtitles.srt", "youtube_chapters.txt"]:
                 remote_meta = f"{remote_job_dir}/{meta_name}"
                 dest_meta = target_dir / meta_name
                 scp_meta = [
@@ -1225,12 +1225,14 @@ print('DELETED')
                         ch_cfg.get("voice_clone_id")
                         or ch_cfg.get("edit_options", {}).get("voice_clone_id")
                     ) if ch_cfg else None
+                    clean_audio = target_dir / "clean_voiceover.wav"
                     print(f"[RemoteRunner] 🎙️ Yerel RVC ses modeli ({channel_voice_clone or 'aktif/varsayılan'}) ve temiz fon müziği giydiriliyor: {dest_video.name}...")
                     clone_res = VoiceCloneManager().apply_voice_clone_to_video(
                         dest_video,
                         clone_id=channel_voice_clone,
                         bgm_path=local_bgm_path,
-                        bgm_volume=bgm_volume
+                        bgm_volume=bgm_volume,
+                        clean_audio_path=clean_audio if clean_audio.exists() else None
                     )
                     if clone_res.get("success"):
                         clone_applied = True

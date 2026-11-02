@@ -96,6 +96,9 @@ async fn run_job(job_file: &Path, force_rebuild: bool) -> Result<()> {
     let mut guard = TimelineGuard::default();
     let mut valid_photos = Vec::new();
 
+    let cut_duration = 2.15; // standard short cut duration (strict max ceiling 2.4s)
+    let num_cuts = (total_video_dur / cut_duration).ceil() as usize;
+
     let mut entries = tokio::fs::read_dir(&pool_dir).await?;
     while let Some(entry) = entries.next_entry().await? {
         let p = entry.path();
@@ -107,6 +110,36 @@ async fn run_job(job_file: &Path, force_rebuild: bool) -> Result<()> {
         }
     }
 
+    // Fotoğraf havuzu henüz doldurulmadıysa Python Editoryal Motoru ile doldur
+    if valid_photos.len() < num_cuts {
+        info!("🌐 [yt-worker-rs] Fotoğraf havuzu taranıyor: {} adet eksik görsel temin ediliyor...", num_cuts - valid_photos.len());
+        let cat = &job.channel_id;
+        let topic = job.get_title();
+        let py_cmd = format!(
+            "import sys; sys.path.insert(0, '.'); from real_media_fetcher import fetch_photo_pool; from pathlib import Path; import json; j = json.load(open('{}')); fetch_photo_pool('{}', '{}', j.get('script_data') or {{}}, target_count={}, work_dir=Path('{}'))",
+            job_file.display(),
+            cat,
+            topic.replace("'", "\\'"),
+            num_cuts,
+            pool_dir.display()
+        );
+        let _ = tokio::process::Command::new("/home/ubuntu/defense_news_shorts/.venv/bin/python3")
+            .args(["-c", &py_cmd])
+            .output()
+            .await;
+
+        let mut re_entries = tokio::fs::read_dir(&pool_dir).await?;
+        while let Some(entry) = re_entries.next_entry().await? {
+            let p = entry.path();
+            if p.extension().map_or(false, |ext| ext == "jpg" || ext == "jpeg" || ext == "png") {
+                if !guard.is_asset_used(&p) {
+                    guard.mark_used(&p);
+                    valid_photos.push(p);
+                }
+            }
+        }
+    }
+
     info!("📸 [yt-worker-rs] Onaylı benzersiz görsel sayısı: {}", valid_photos.len());
 
     // 3. Render Jump Cuts
@@ -114,9 +147,6 @@ async fn run_job(job_file: &Path, force_rebuild: bool) -> Result<()> {
     let renderer = FfmpegRenderer::new(30);
     let cuts_dir = workspace_dir.join("cuts");
     let mut cut_files = Vec::new();
-
-    let cut_duration = 2.15; // standard short cut duration
-    let num_cuts = (total_video_dur / cut_duration).ceil() as usize;
 
     let pz_types = [
         PanZoomType::ZoomIn,
@@ -148,10 +178,34 @@ async fn run_job(job_file: &Path, force_rebuild: bool) -> Result<()> {
     let raw_visual = workspace_dir.join("raw_visual.mp4");
     renderer.concat_cuts(&concat_txt, &raw_visual).await?;
 
+    // 4.5. Glassmorphic Subtitles
+    let subtitled_visual = workspace_dir.join("subtitled_visual.mp4");
+    let py_sub_cmd = format!(
+        "import sys; sys.path.insert(0, '.'); from glassmorphism_subtitles import generate_glassmorphism_subtitles; from pathlib import Path; import json; j = json.load(open('{}')); generate_glassmorphism_subtitles(j.get('script_data') or {{}}, total_dur={:.2}, scratch_dir=Path('{}'), top_badge='🌍 MUST VISIT', category='{}')",
+        job_file.display(),
+        total_video_dur,
+        workspace_dir.display(),
+        job.channel_id
+    );
+    let _ = tokio::process::Command::new("/home/ubuntu/defense_news_shorts/.venv/bin/python3")
+        .args(["-c", &py_sub_cmd])
+        .output()
+        .await;
+
+    let sub_concat = workspace_dir.join("glass_subtitles_concat.txt");
+    let master_visual = if sub_concat.exists() {
+        match renderer.overlay_glass_subtitles(&raw_visual, &sub_concat, &subtitled_visual).await {
+            Ok(_) => subtitled_visual,
+            Err(_) => raw_visual,
+        }
+    } else {
+        raw_visual
+    };
+
     // 5. Finalize Video with Audio
     update_status("rendering", 88, "Dış ses ve arka plan müziği miksleniyor...");
     let final_video = output_dir.join("final_video.mp4");
-    renderer.finalize_video(&raw_visual, &voiceover_file, &final_video, total_video_dur).await?;
+    renderer.finalize_video(&master_visual, &voiceover_file, &final_video, total_video_dur).await?;
 
     // 6. Metadata Output
     let meta_file = output_dir.join("metadata.json");

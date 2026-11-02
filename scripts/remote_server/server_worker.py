@@ -10,6 +10,7 @@ import re
 import sys
 import json
 import time
+import math
 import shutil
 import base64
 import random
@@ -2401,219 +2402,150 @@ def _render_scene_aligned_general(
     is_shorts = bool(channel_cfg.get("shorts_mode", True))
     used_media_registry = set()
 
-    video_segments = []
-    concat_file = work_dir / "general_scene_concat.txt"
+    # 1. Saf Dış Ses Kanalını Birleştir (Clean Voiceover Track)
+    audio_concat_file = work_dir / "general_audio_concat.txt"
     scene_timeline = []  # [(index, text, start_time, end_time), ...]
     current_time = 0.0
 
-    for index, text, _payload in entries:
-        audio_path = normalized_audio[index]
-        duration = _probe_scene_audio_duration(audio_path)
-        scene_timeline.append((index, text, current_time, current_time + duration))
-        current_time += duration
+    with audio_concat_file.open("w", encoding="utf-8") as acf:
+        for index, text, _payload in entries:
+            audio_path = normalized_audio[index]
+            dur = _probe_scene_audio_duration(audio_path)
+            scene_timeline.append((index, text, current_time, current_time + dur))
+            current_time += dur
+            acf.write(f"file '{audio_path.resolve()}'\n")
 
-        segment_path = work_dir / f"general_scene_video_{index}.mp4"
-        image_path = scene_images.get(index)
-
-        # 1. Otomatik Gerçek Medya Çekimi (Görsel veya Video yoksa)
-        if not image_path:
-            try:
-                from real_media_fetcher import get_real_scene_media
-                scene_obj = scenes[index] if index < len(scenes) else {"narration": text}
-                fetched = get_real_scene_media(
-                    category=category,
-                    scene_idx=index,
-                    total_scenes=len(scenes),
-                    topic=topic,
-                    scene_data=scene_obj,
-                    work_dir=work_dir / "scene_assets",
-                    target_w=width,
-                    target_h=height,
-                    target_dur=duration,
-                    session_used=used_media_registry
-                )
-                if fetched and Path(fetched).is_file() and Path(fetched).stat().st_size > 1000:
-                    image_path = Path(fetched)
-                    used_media_registry.add(str(image_path))
-                    print(f"[Worker-General] 🌐 Sahne {index + 1} için gerçek medya bağlandı: {image_path.name}")
-            except Exception as err_fetch:
-                print(f"[Worker-General] ⚠️ Gerçek medya arama uyarısı (Sahne {index + 1}): {err_fetch}")
-
-        # 2. Acil Durum Fallback (Asla boş lacivert ekran olmasın)
-        if not image_path or not Path(image_path).is_file():
-            try:
-                from fallback_engine import fallback_engine
-                safe_fb = work_dir / f"scene_failsafe_{index}.jpg"
-                fallback_engine.generate_infographic_canvas(
-                    output_image_path=safe_fb,
-                    primary_entity=topic,
-                    team_name=None,
-                    scene_text=text,
-                    width=width,
-                    height=height
-                )
-                if safe_fb.is_file() and safe_fb.stat().st_size > 1000:
-                    image_path = safe_fb
-                    print(f"[Worker-General] 🛡️ Sahne {index + 1} için FallbackEngine infografik bağlandı.")
-            except Exception as e_fb:
-                print(f"[Worker-General] ⚠️ FallbackEngine uyarısı: {e_fb}")
-
-        # 3. Video Segmenti Oluşturma (Video vs Görsel / Ken Burns)
-        is_video_asset = False
-        if image_path:
-            p_img = Path(image_path)
-            if p_img.suffix.lower() in (".mp4", ".mov", ".ts", ".webm", ".mkv"):
-                is_video_asset = True
-
-        frames = int(round(duration * 25))
-        command = ["ffmpeg", "-y"]
-        if is_video_asset:
-            command.extend([
-                "-stream_loop", "-1", "-i", str(image_path),
-                "-i", str(audio_path),
-                "-vf", f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps=25,setsar=1",
-                "-t", f"{duration:.6f}",
-                "-map", "0:v:0", "-map", "1:a:0",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-                "-pix_fmt", "yuv420p", "-r", "25",
-                "-c:a", "aac", "-b:a", "192k", "-shortest",
-                str(segment_path)
-            ])
-        elif image_path:
-            # Ken Burns dinamik kamera hareketi
-            if index % 2 == 0:
-                vf_kb = (
-                    f"scale={width}*1.15:{height}*1.15:force_original_aspect_ratio=increase,"
-                    f"crop={width}*1.15:{height}*1.15,"
-                    f"zoompan=z='min(zoom+0.0008,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={width}x{height}:fps=25,fps=25,setsar=1"
-                )
-            else:
-                vf_kb = (
-                    f"scale={width}*1.15:{height}*1.15:force_original_aspect_ratio=increase,"
-                    f"crop={width}*1.15:{height}*1.15,"
-                    f"zoompan=z='if(lte(zoom,1.0),1.15,max(1.001,zoom-0.0008))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={width}x{height}:fps=25,fps=25,setsar=1"
-                )
-            command.extend([
-                "-loop", "1", "-framerate", "25", "-i", str(image_path),
-                "-i", str(audio_path),
-                "-vf", vf_kb,
-                "-t", f"{duration:.6f}",
-                "-map", "0:v:0", "-map", "1:a:0",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-                "-pix_fmt", "yuv420p", "-r", "25",
-                "-c:a", "aac", "-b:a", "192k", "-shortest",
-                str(segment_path)
-            ])
-        else:
-            command.extend([
-                "-f", "lavfi", "-i", f"color=c=0x0f172a:s={width}x{height}:r=25",
-                "-i", str(audio_path),
-                "-vf", width_height_filter,
-                "-t", f"{duration:.6f}",
-                "-map", "0:v:0", "-map", "1:a:0",
-                "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-                "-pix_fmt", "yuv420p", "-r", "25",
-                "-c:a", "aac", "-b:a", "192k", "-shortest",
-                str(segment_path)
-            ])
-
-        subprocess.run(command, capture_output=True, check=True)
-        if not segment_path.is_file() or segment_path.stat().st_size == 0:
-            raise RuntimeError(f"Sahne videosu oluşturulamadı: {segment_path.name}")
-        video_segments.append(segment_path)
-        print(
-            f"[Worker-General] Sahne {index + 1}/{len(scenes)}: "
-            f"{duration:.2f} sn ses, materyal: {image_path.name if image_path else 'arka plan'}"
-        )
-
-    with concat_file.open("w", encoding="utf-8") as file:
-        for segment in video_segments:
-            file.write(f"file '{segment.name}'\n")
-
-    raw_concat_video = work_dir / "raw_concat.mp4"
+    clean_voiceover = work_dir / "clean_voiceover.wav"
     subprocess.run(
         [
-            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file),
-            "-c", "copy", "-movflags", "+faststart", str(raw_concat_video),
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(audio_concat_file),
+            "-ar", "48000", "-ac", "2", str(clean_voiceover),
         ],
-        capture_output=True, check=True, cwd=str(work_dir),
+        capture_output=True, check=True,
+    )
+    total_audio_dur = _probe_scene_audio_duration(clean_voiceover)
+    print(f"[Worker-General] 🎙️ Saf dış ses hazırlandı: {total_audio_dur:.2f} sn ({len(entries)} sahne)")
+
+    # 2. 2.15s Tavanlı Jump-Cut Slicing & Editoryal Fotoğraf Havuzu
+    cut_duration = 2.15  # Max 2.4s kuralı gereğince 2.15s standart ritim
+    num_cuts = max(1, int(math.ceil(total_audio_dur / cut_duration)))
+    print(f"[Worker-General] ✂️ 2.15s Tavanı: {total_audio_dur:.2f} sn süre için {num_cuts} adet dinamik kesme yapılacak.")
+
+    from real_media_fetcher import fetch_photo_pool
+    photo_pool_dir = work_dir / "photo_pool"
+    photo_assets = fetch_photo_pool(
+        category=category,
+        topic=topic,
+        script_data=script,
+        target_count=num_cuts,
+        work_dir=photo_pool_dir,
+        target_w=width,
+        target_h=height,
+        session_used=used_media_registry,
     )
 
-    # 4. ASS Altyazı ve Kategori Kancası (Hook Badge) Dosyası Üret
-    def sec_to_ass(sec: float) -> str:
-        h = int(sec // 3600)
-        m = int((sec % 3600) // 60)
-        s = sec % 60
-        cs = int(round((s - int(s)) * 100))
-        if cs == 100:
-            cs = 0
-            s += 1
-        return f"{h:01d}:{m:02d}:{int(s):02d}.{cs:02d}"
+    if not photo_assets:
+        raise RuntimeError("Fotoğraf havuzundan hiçbir görsel temin edilemedi.")
 
-    ass_path = work_dir / "subtitles.ass"
-    font_name = "DejaVu Sans"
-    font_size = 58 if is_shorts else 38
-    margin_v = 260 if is_shorts else 60
+    # 3. Ken Burns Dinamik Kesmelerini Üret (4 Alternatif Kamera Hareketi)
+    cuts_dir = work_dir / "cuts"
+    cuts_dir.mkdir(parents=True, exist_ok=True)
+    cut_segments = []
+    cuts_concat_file = work_dir / "cuts_concat.txt"
 
-    ass_lines = [
-        "[Script Info]",
-        "ScriptType: v4.00+",
-        f"PlayResX: {width}",
-        f"PlayResY: {height}",
-        "ScaledBorderAndShadow: yes",
-        "",
-        "[V4+ Styles]",
-        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        f"Style: TikTokYellow,{font_name},{font_size},&H0000FFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,5.5,2.0,2,60,60,{margin_v},1",
-        f"Style: HookBadge,{font_name},40,&H00FFFFFF,&H00000000,&H00000000,&H99000000,-1,0,0,0,100,100,0,0,3,4.0,0.0,8,40,40,140,1",
-        "",
-        "[Events]",
-        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-    ]
+    for cut_idx in range(num_cuts):
+        seg_dur = min(cut_duration, max(0.5, total_audio_dur - (cut_idx * cut_duration)))
+        seg_path = cuts_dir / f"cut_{cut_idx:03d}.mp4"
+        photo_path = photo_assets[cut_idx % len(photo_assets)]
+        frames = int(round(seg_dur * 25))
 
-    # A) Hyperframes Hook Rozeti (İlk 4.5 sn boyunca üst ortada)
-    enable_hook = bool(edit_opts.get("enable_hyperframes_hook", True))
-    hook_badge = edit_opts.get("hyperframes_hook_badge") or "🌍 MUST VISIT"
-    if enable_hook and current_time > 3.0:
-        badge_text = f"{hook_badge}  |  {topic.upper()}"[:45]
-        hook_end = min(4.5, current_time)
-        ass_lines.append(
-            f"Dialogue: 0,0:00:00.00,{sec_to_ass(hook_end)},HookBadge,,0,0,0,,{{\\an8\\pos({width//2},140)}}{badge_text}"
-        )
-
-    # B) Dinamik 3-5 Kelimelik Altyazı Lokmaları (Pop / Synchronous Subtitles)
-    for index, text, s_start, s_end in scene_timeline:
-        words = text.split()
-        if not words:
-            continue
-        total_dur = s_end - s_start
-        chunks = []
-        cur_chunk = []
-        for w in words:
-            cur_chunk.append(w)
-            if len(cur_chunk) >= 4 or (len(cur_chunk) >= 3 and len(w) >= 7):
-                chunks.append(" ".join(cur_chunk))
-                cur_chunk = []
-        if cur_chunk:
-            if chunks and len(cur_chunk) <= 2:
-                chunks[-1] += " " + " ".join(cur_chunk)
-            else:
-                chunks.append(" ".join(cur_chunk))
-
-        num_c = len(chunks)
-        chunk_dur = total_dur / num_c
-        for c_idx, c_text in enumerate(chunks):
-            c_st = s_start + (c_idx * chunk_dur)
-            c_en = s_start + ((c_idx + 1) * chunk_dur)
-            safe_text = c_text.replace("{", "").replace("}", "")
-            ass_lines.append(
-                f"Dialogue: 0,{sec_to_ass(c_st)},{sec_to_ass(c_en)},TikTokYellow,,0,0,0,,{{\\an2\\pos({width//2},{height - margin_v})}}{safe_text.upper()}"
+        # 4 Farklı Ken Burns Kamera Hareketi:
+        # 0: Merkeze Yakınlaşma (ZoomIn 1.0 -> 1.15)
+        # 1: Merkezden Uzaklaşma (ZoomOut 1.15 -> 1.0)
+        # 2: Soldan Sağa Kayma (PanLeftToRight)
+        # 3: Sağdan Sola Kayma (PanRightToLeft)
+        mode = cut_idx % 4
+        if mode == 0:
+            vf_kb = (
+                f"scale={width}*1.15:{height}*1.15:force_original_aspect_ratio=increase,"
+                f"crop={width}*1.15:{height}*1.15,"
+                f"zoompan=z='min(zoom+0.0028,1.15)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={width}x{height}:fps=25,fps=25,setsar=1"
+            )
+        elif mode == 1:
+            vf_kb = (
+                f"scale={width}*1.15:{height}*1.15:force_original_aspect_ratio=increase,"
+                f"crop={width}*1.15:{height}*1.15,"
+                f"zoompan=z='if(lte(zoom,1.0),1.15,max(1.001,zoom-0.0028))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={width}x{height}:fps=25,fps=25,setsar=1"
+            )
+        elif mode == 2:
+            vf_kb = (
+                f"scale={width}*1.15:{height}*1.15:force_original_aspect_ratio=increase,"
+                f"crop={width}*1.15:{height}*1.15,"
+                f"zoompan=z='1.12':x='if(lte(on,1),0,min(x+2.0,iw-iw/zoom))':y='ih/2-(ih/zoom/2)':d={frames}:s={width}x{height}:fps=25,fps=25,setsar=1"
+            )
+        else:
+            vf_kb = (
+                f"scale={width}*1.15:{height}*1.15:force_original_aspect_ratio=increase,"
+                f"crop={width}*1.15:{height}*1.15,"
+                f"zoompan=z='1.12':x='if(lte(on,1),iw-iw/zoom,max(0,x-2.0))':y='ih/2-(ih/zoom/2)':d={frames}:s={width}x{height}:fps=25,fps=25,setsar=1"
             )
 
-    ass_path.write_text("\n".join(ass_lines), encoding="utf-8")
-    print(f"[Worker-General] 📝 Altyazı dosyası hazırlandı ({len(ass_lines) - 12} diyalog): {ass_path.name}")
+        cmd_cut = [
+            "ffmpeg", "-y",
+            "-loop", "1", "-framerate", "25", "-i", str(photo_path),
+            "-vf", vf_kb,
+            "-t", f"{seg_dur:.6f}",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
+            "-pix_fmt", "yuv420p", "-r", "25", "-an",
+            str(seg_path)
+        ]
+        subprocess.run(cmd_cut, capture_output=True, check=True)
+        cut_segments.append(seg_path)
 
-    # 5. Fon Müziği (BGM) Çözümleme
+    with cuts_concat_file.open("w", encoding="utf-8") as f_cuts:
+        for seg in cut_segments:
+            f_cuts.write(f"file '{seg.resolve()}'\n")
+
+    raw_visuals = work_dir / "raw_visuals.mp4"
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(cuts_concat_file),
+            "-c", "copy", "-movflags", "+faststart", str(raw_visuals),
+        ],
+        capture_output=True, check=True,
+    )
+    print(f"[Worker-General] 🎞️ {len(cut_segments)} kesmelik görsel master hazırlandı: {raw_visuals.name}")
+
+    # 4. Altın Çerçeveli Glassmorphism Altyazı Motorunu Bağla
+    from glassmorphism_subtitles import generate_glassmorphism_subtitles
+    enable_hook = bool(edit_opts.get("enable_hyperframes_hook", True))
+    hook_badge = edit_opts.get("hyperframes_hook_badge") or "🌍 MUST VISIT"
+
+    sub_concat_txt = generate_glassmorphism_subtitles(
+        script=script,
+        total_dur=total_audio_dur,
+        scratch_dir=work_dir,
+        top_badge=hook_badge if enable_hook else None,
+        category=category,
+    )
+
+    subtitled_visuals = work_dir / "subtitled_visuals.mp4"
+    print(f"[Worker-General] ✨ Glassmorphism altyazı katmanı videoya işleniyor...")
+    subprocess.run(
+        [
+            "ffmpeg", "-y",
+            "-i", str(raw_visuals),
+            "-f", "concat", "-safe", "0", "-i", str(sub_concat_txt),
+            "-filter_complex", "[0:v][1:v]overlay=0:0:eof_action=pass[v_out]",
+            "-map", "[v_out]",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            str(subtitled_visuals)
+        ],
+        capture_output=True, check=True,
+    )
+
+    # 5. Fon Müziği (BGM) & Ses Miksajı (0.5s Smooth Fadeout)
     bgm_file = None
     music_dir = BASE_DIR / "assets" / "music"
     bgm_tl = script.get("bgm_timeline") or []
@@ -2631,43 +2563,45 @@ def _render_scene_aligned_general(
                 bgm_file = cand
 
     output_video = work_dir / "final_video.mp4"
-    print(f"[Worker-General] 🎬 Altyazı ve ses miksajı yapılıyor (BGM: {bgm_file.name if bgm_file else 'Yok'})...")
+    fade_start = max(0.0, total_audio_dur - 0.5)
 
     if bgm_file and bgm_file.is_file():
-        bgm_vol = float(edit_opts.get("bgm_volume") or 0.10)
+        bgm_vol = float(edit_opts.get("bgm_volume") or 0.12)
+        print(f"[Worker-General] 🎵 Dış ses + BGM miksleniyor ({bgm_file.name}, vol={bgm_vol:.2f}, fade_start={fade_start:.2f}s)...")
         sub_cmd = [
             "ffmpeg", "-y",
-            "-i", str(raw_concat_video),
+            "-i", str(subtitled_visuals),
+            "-i", str(clean_voiceover),
             "-stream_loop", "-1", "-i", str(bgm_file),
             "-filter_complex", (
-                f"[0:v]ass='{str(ass_path)}'[v_out];"
-                f"[0:a]volume=1.0[v_aud];"
-                f"[1:a]volume={bgm_vol:.2f}[b_aud];"
-                f"[v_aud][b_aud]amix=inputs=2:duration=first:dropout_transition=2[a_out]"
+                f"[1:a]volume=1.0[v_aud];"
+                f"[2:a]volume={bgm_vol:.2f},afade=t=out:st={fade_start:.2f}:d=0.5[b_aud];"
+                f"[v_aud][b_aud]amix=inputs=2:duration=first:dropout_transition=2,afade=t=out:st={fade_start:.2f}:d=0.5[a_out]"
             ),
-            "-map", "[v_out]",
+            "-map", "0:v",
             "-map", "[a_out]",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+            "-c:v", "copy",
             "-c:a", "aac", "-b:a", "192k",
-            "-shortest", "-movflags", "+faststart",
+            "-t", f"{total_audio_dur:.3f}",
+            "-movflags", "+faststart",
             str(output_video)
         ]
     else:
+        print(f"[Worker-General] 🎙️ Sadece saf dış ses miksleniyor...")
         sub_cmd = [
             "ffmpeg", "-y",
-            "-i", str(raw_concat_video),
-            "-vf", f"ass='{str(ass_path)}'",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
-            "-c:a", "copy",
+            "-i", str(subtitled_visuals),
+            "-i", str(clean_voiceover),
+            "-map", "0:v",
+            "-map", "1:a",
+            "-c:v", "copy",
+            "-c:a", "aac", "-b:a", "192k",
+            "-t", f"{total_audio_dur:.3f}",
             "-movflags", "+faststart",
             str(output_video)
         ]
 
-    sub_res = subprocess.run(sub_cmd, capture_output=True)
-    if sub_res.returncode != 0:
-        err_msg = sub_res.stderr.decode('utf-8', errors='ignore')[-300:]
-        print(f"[Worker-General] ⚠️ Altyazı giydirme uyarısı: {err_msg}")
-        shutil.copy(raw_concat_video, output_video)
+    subprocess.run(sub_cmd, capture_output=True, check=True)
 
     if not output_video.is_file() or output_video.stat().st_size == 0:
         raise RuntimeError("Sahne eşlemeli genel video üretilemedi.")

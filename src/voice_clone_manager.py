@@ -549,12 +549,13 @@ class VoiceCloneManager:
         output_path: Optional[Union[str, Path]] = None,
         embed_watermark: bool = True,
         bgm_path: Optional[Union[str, Path]] = None,
-        bgm_volume: float = 0.18
+        bgm_volume: float = 0.18,
+        clean_audio_path: Optional[Union[str, Path]] = None
     ) -> Dict[str, Any]:
         """
-        Yerel Apple Silicon (MPS/CPU) hızlandırmasıyla videonun sesini çıkarır,
-        aktif RVC ses klon modelini (Applio) giydirir, adli ultrasonik filigranı
-        ekler ve videoyu YENİDEN KODLAMADAN (-c:v copy) saniyeler içinde birleştirir.
+        Yerel Apple Silicon (MPS/CPU) hızlandırmasıyla videonun sesini çıkarır (veya sağlanan
+        saf dış ses dosyasını kullanır), aktif RVC ses klon modelini (Applio) giydirir, adli ultrasonik
+        filigranı ekler ve videoyu YENİDEN KODLAMADAN (-c:v copy) saniyeler içinde birleştirir.
         """
         v_path = Path(video_path).resolve()
         if not v_path.exists() or v_path.stat().st_size < 10000:
@@ -607,13 +608,22 @@ class VoiceCloneManager:
 
         t_start = time.perf_counter()
         try:
-            # 1. Videodan saf 44.1kHz mono sesi ayıkla
-            logger.info(f"[VoiceCloneManager] 🎬 Videodan ses çıkarılıyor: {v_path.name}")
-            cmd_extract = [
-                "ffmpeg", "-y", "-i", str(v_path),
-                "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1",
-                str(raw_audio)
-            ]
+            # 1. Saf 44.1kHz mono dış sesi hazırla (Varsa temiz ses dosyasından, yoksa videodan ayıkla)
+            clean_cand = Path(clean_audio_path) if clean_audio_path else (v_path.parent / "clean_voiceover.wav")
+            if clean_cand.is_file() and clean_cand.stat().st_size > 1000:
+                logger.info(f"[VoiceCloneManager] 💎 Saf dış ses dosyası bulundu ve kullanılıyor: {clean_cand.name}")
+                cmd_extract = [
+                    "ffmpeg", "-y", "-i", str(clean_cand),
+                    "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1",
+                    str(raw_audio)
+                ]
+            else:
+                logger.info(f"[VoiceCloneManager] 🎬 Videodan ses çıkarılıyor: {v_path.name}")
+                cmd_extract = [
+                    "ffmpeg", "-y", "-i", str(v_path),
+                    "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1",
+                    str(raw_audio)
+                ]
             subprocess.run(cmd_extract, capture_output=True, check=True, timeout=120)
 
             if not raw_audio.exists() or raw_audio.stat().st_size < 1000:
