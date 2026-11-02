@@ -631,9 +631,11 @@ def generate_glassmorphism_subtitles(
     theme = get_channel_theme(category)
 
     # Konuya ve kanala duyarlı dinamik üst rozet (Top Header Bug) belirleme
-    effective_top_badge = top_badge
-    if not effective_top_badge:
-        topic_corpus = f"{script.get('title', '')} {script.get('topic', '')} {category}".lower()
+    raw_badge = (top_badge or "").replace("🌍", "").strip()
+    is_generic = not raw_badge or any(g in raw_badge.upper() for g in ["MUST VISIT", "TRAVEL GUIDE", "LETSTRAVEII", "EXPLORE"])
+    
+    topic_corpus = f"{script.get('title', '')} {script.get('topic', '')} {category}".lower()
+    if is_generic:
         if any(w in topic_corpus for w in ["airplane", "airline", "aircraft", "cockpit", "flight", "cabin", "landing", "aviation"]):
             effective_top_badge = "AVIATION SECRETS"
         elif any(w in topic_corpus for w in ["live like royalty", "50/day", "luxury", "villa", "budget luxury"]):
@@ -642,8 +644,12 @@ def generate_glassmorphism_subtitles(
             effective_top_badge = "STREET FOOD SHOWDOWN"
         elif any(w in topic_corpus for w in ["train", "railway", "alps", "mountain", "steepest"]):
             effective_top_badge = "SCENIC EXPEDITIONS"
+        elif raw_badge:
+            effective_top_badge = raw_badge
         else:
             effective_top_badge = theme.default_badge
+    else:
+        effective_top_badge = raw_badge
 
     scenes = script.get("scenes", [])
     raw_texts = []

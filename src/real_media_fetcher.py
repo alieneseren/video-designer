@@ -166,6 +166,8 @@ UNWANTED_PHOTO_KEYWORDS = [
     "gondola", "capsule", "breitling", "orbiter", "museum display", "museum exhibit",
     "vintage 19", "black and white", "bw photo", "monochrome", "balloon", "hot air balloon",
     "glider", "propeller plane", "biplane", "model plane", "toy plane", "miniature",
+    "breaker", "switchboard", "electronics rack", "equipment rack", "circuit board",
+    "carpet", "texture", "fabric", "macro texture", "close-up texture", "schematic",
     # Ofis, masa, plastik bardak, paket yemek, ev yemeği
     "office", "desk", "cubicle", "keyboard", "computer", "laptop",
     "plastic cup", "disposable cup", "paper cup", "water cup", "coffee cup",
@@ -444,6 +446,17 @@ def calculate_sharpness(pil_img: Image.Image) -> float:
         return float(ImageStat.Stat(edges).var[0])
 
 
+def is_monochrome_image(pil_img: Image.Image, min_color_diff: float = 6.0) -> bool:
+    """Siyah-beyaz arşiv, renksiz gri çizim ve tek tonlu eski fotoğrafları tespit eder."""
+    try:
+        thumb = pil_img.convert("RGB").resize((48, 48), Image.Resampling.BILINEAR)
+        pixels = list(thumb.getdata())
+        diff_sum = sum(abs(r - g) + abs(g - b) + abs(r - b) for r, g, b in pixels)
+        return (diff_sum / len(pixels)) < min_color_diff
+    except Exception:
+        return False
+
+
 def calculate_dhash(image: Image.Image, hash_size: int = 8) -> int:
     """Computes a 64-bit difference hash (dHash) for visual perceptual comparison."""
     resized = image.convert("L").resize((hash_size + 1, hash_size), Image.Resampling.LANCZOS)
@@ -508,6 +521,11 @@ def download_and_format_image(
             sharpness_raw = calculate_sharpness(im)
             if sharpness_raw < 32.0:
                 print(f"[REAL-FETCHER] ⚠️ Düşük netlik/bulanık ham görsel elendi (sharpness={sharpness_raw:.1f} < 32): {img_url[:60]}")
+                continue
+
+            # Siyah-Beyaz / Monokrom Arşiv Görseli Denetimi
+            if is_monochrome_image(im):
+                print(f"[REAL-FETCHER] ⚠️ Siyah-beyaz / monokrom arşiv görseli elendi: {img_url[:60]}")
                 continue
 
             # Hedef oranı dolduracak şekilde boyutlandır (Ken Burns için pay bırakarak)
@@ -1245,6 +1263,12 @@ def fetch_photo_pool(
                 # Algısal dHash Benzerlik Testi (Tüm video genelinde hamming_distance < 14 olanlar elenir)
                 try:
                     cand_im = Image.open(photo_p).convert("RGB")
+                    if is_monochrome_image(cand_im):
+                        print(f"[PHOTO-POOL] ⚠️ Siyah-beyaz / monokrom arşiv görseli elendi: {photo_p.name} [{cand.get('title', '')[:30]}]")
+                        if photo_p.is_file():
+                            photo_p.unlink()
+                        continue
+
                     cand_hash = calculate_dhash(cand_im)
                     if any(hamming_distance(cand_hash, prev_h) < 14 for prev_h in accepted_video_hashes):
                         print(f"[PHOTO-POOL] ⚠️ Algısal görsel tekrarı (dHash dist < 14) engellendi: {photo_p.name} [{cand.get('title', '')[:30]}]")
@@ -1341,6 +1365,11 @@ def fetch_photo_pool(
 
                 try:
                     cand_im = Image.open(photo_p).convert("RGB")
+                    if is_monochrome_image(cand_im):
+                        if photo_p.is_file():
+                            photo_p.unlink()
+                        continue
+
                     cand_hash = calculate_dhash(cand_im)
                     if any(hamming_distance(cand_hash, prev_h) < 14 for prev_h in accepted_video_hashes):
                         if photo_p.is_file():
