@@ -2855,10 +2855,17 @@ def run_job(job_file: Path, force_rebuild: bool = False):
         if workspace_dir.exists():
             shutil.rmtree(workspace_dir, ignore_errors=True)
         if work_dir.exists():
+            for sub_d in ["photo_pool", "cuts", "glass_sub_cards", "broll_pool"]:
+                target_sub = work_dir / sub_d
+                if target_sub.exists():
+                    shutil.rmtree(target_sub, ignore_errors=True)
             for f in work_dir.glob("*.mp4"):
                 try: f.unlink()
                 except Exception: pass
             for f in work_dir.glob("raw_*"):
+                try: f.unlink()
+                except Exception: pass
+            for f in work_dir.glob("*_concat.txt"):
                 try: f.unlink()
                 except Exception: pass
 

@@ -1254,6 +1254,7 @@ def fetch_photo_pool(
                 c_url = cand.get("url")
                 if not c_url or c_url in downloaded_urls or c_url in used:
                     continue
+                used.add(c_url)  # Bir kez incelenen URL'yi (başarılı veya başarısız) bir daha sorgulama!
 
                 photo_p = pool_dir / f"scene_{sc_idx:02d}_photo_{len(scene_photos[sc_idx]):02d}.jpg"
                 ok = download_and_format_image(c_url, str(photo_p), target_w, target_h)
@@ -1357,6 +1358,7 @@ def fetch_photo_pool(
                 c_url = cand.get("url")
                 if not c_url or c_url in downloaded_urls or c_url in used:
                     continue
+                used.add(c_url)  # Bir kez denenen görseli kota döngüsünde de tekrar deneme!
 
                 photo_p = pool_dir / f"extra_quota_photo_{len(all_downloaded_photos):02d}.jpg"
                 ok = download_and_format_image(c_url, str(photo_p), target_w, target_h)
