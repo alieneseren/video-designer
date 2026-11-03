@@ -2443,6 +2443,28 @@ def _render_scene_aligned_general(
     num_cuts = max(1, int(math.ceil(total_audio_dur / cut_duration)))
     print(f"[Worker-General] ✂️ 2.15s Tavanı: {total_audio_dur:.2f} sn süre için {num_cuts} adet dinamik kesme yapılacak.")
 
+    # VisualDirector 6 Kural Sözleşmesi ile Plan Derleme
+    try:
+        from visual_director import visual_director
+    except ImportError:
+        try:
+            from src.visual_director import visual_director
+        except ImportError:
+            visual_director = None
+
+    visual_plan = None
+    if visual_director is not None:
+        try:
+            visual_plan = visual_director.generate_visual_timeline(
+                topic=topic,
+                category=category,
+                script_data=script,
+                total_duration=total_audio_dur,
+            )
+            print(f"[Worker-General] 🎬 VisualDirector zaman çizelgesi devrede ({len(visual_plan.get('timeline_scenes', []))} kesme, rozet: '{visual_plan.get('project_meta', {}).get('category_badge')}').")
+        except Exception as e_vd:
+            print(f"[Worker-General] ⚠️ VisualDirector derleme uyarısı: {e_vd}")
+
     from real_media_fetcher import fetch_photo_pool
     photo_pool_dir = work_dir / "photo_pool"
     photo_assets = fetch_photo_pool(
@@ -2456,6 +2478,7 @@ def _render_scene_aligned_general(
         session_used=used_media_registry,
         scene_timeline=scene_timeline,
         cut_duration=cut_duration,
+        visual_plan=visual_plan,
     )
 
     if not photo_assets:
@@ -2541,6 +2564,7 @@ def _render_scene_aligned_general(
         scratch_dir=work_dir,
         top_badge=hook_badge if enable_hook else None,
         category=category,
+        visual_plan=visual_plan,
     )
 
     subtitled_visuals = work_dir / "subtitled_visuals.mp4"

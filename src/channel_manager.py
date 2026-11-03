@@ -143,7 +143,7 @@ CATEGORY_PRESETS: dict[str, dict] = {
             "transition_dur": "0.4",
             "hook_intro_effect": True,
             "enable_hyperframes_hook": True,
-            "hyperframes_hook_badge": "🌍 MUST VISIT",
+            "hyperframes_hook_badge": None,
             "normalize_audio_loudness": True,
             "youtube_category": "travel",
             "music_genre": "travel_acoustic",

@@ -621,7 +621,8 @@ def generate_glassmorphism_subtitles(
     W: int = 1080,
     H: int = 1920,
     top_badge: Optional[str] = None,
-    category: str = "general"
+    category: str = "general",
+    visual_plan: Optional[Dict[str, Any]] = None
 ) -> Path:
     """
     Tüm anlatımı 2-4 kelimelik doğal kartlara böler, kanal temasına göre şeffaf PNG üretir
@@ -630,28 +631,60 @@ def generate_glassmorphism_subtitles(
     scratch_dir = Path(scratch_dir)
     theme = get_channel_theme(category)
 
-    # Konuya ve kanala duyarlı dinamik üst rozet (Top Header Bug) belirleme
-    raw_badge = (top_badge or "").replace("🌍", "").strip()
-    is_generic = not raw_badge or any(g in raw_badge.upper() for g in ["MUST VISIT", "TRAVEL GUIDE", "LETSTRAVEII", "EXPLORE"])
-    
-    topic_corpus = f"{script.get('title', '')} {script.get('topic', '')} {category}".lower()
-    if is_generic:
-        if any(w in topic_corpus for w in ["airplane", "airline", "aircraft", "cockpit", "flight", "cabin", "landing", "aviation"]):
-            effective_top_badge = "AVIATION SECRETS"
-        elif any(w in topic_corpus for w in ["live like royalty", "50/day", "luxury", "villa", "budget luxury"]):
-            effective_top_badge = "BUDGET LUXURY GUIDE"
-        elif any(w in topic_corpus for w in ["underground city", "derinkuyu", "ancient", "mystery", "cappadocia", "civilization", "archaeology", "ruins", "history", "monument"]):
-            effective_top_badge = "ANCIENT MYSTERIES"
-        elif any(w in topic_corpus for w in ["street food", "food", "tacos", "pad thai", "culinary", "bangkok vs"]):
-            effective_top_badge = "STREET FOOD SHOWDOWN"
-        elif any(w in topic_corpus for w in ["train", "railway", "alps", "mountain", "steepest"]):
-            effective_top_badge = "SCENIC EXPEDITIONS"
-        elif raw_badge:
-            effective_top_badge = raw_badge
+    # 1. VisualDirector veya Proje Planından Dinamik Rozet & Pencere Çözme
+    badge_start = 0.0
+    badge_end = 4.5
+    effective_top_badge = None
+
+    if visual_plan and isinstance(visual_plan, dict):
+        p_meta = visual_plan.get("project_meta", {})
+        effective_top_badge = p_meta.get("category_badge")
+        b_win = p_meta.get("badge_display_window") or {}
+        badge_start = float(b_win.get("start_sec", 0.0))
+        badge_end = float(b_win.get("end_sec", 4.5))
+
+    if not effective_top_badge:
+        try:
+            from visual_director import visual_director
+        except ImportError:
+            try:
+                from src.visual_director import visual_director
+            except ImportError:
+                visual_director = None
+        if visual_director is not None:
+            prof = visual_director.detect_domain_profile(
+                script.get("title", "") or script.get("topic", ""),
+                category,
+                str(script)
+            )
+            effective_top_badge = prof.get("category_badge")
+            b_win = prof.get("badge_display_window") or {}
+            badge_start = float(b_win.get("start_sec", 0.0))
+            badge_end = float(b_win.get("end_sec", 4.5))
+
+    # Konuya ve kanala duyarlı dinamik üst rozet (Top Header Bug) fallback belirleme
+    if not effective_top_badge:
+        raw_badge = (top_badge or "").replace("🌍", "").strip()
+        is_generic = not raw_badge or any(g in raw_badge.upper() for g in ["MUST VISIT", "TRAVEL GUIDE", "LETSTRAVEII", "EXPLORE"])
+        
+        topic_corpus = f"{script.get('title', '')} {script.get('topic', '')} {category}".lower()
+        if is_generic:
+            if any(w in topic_corpus for w in ["airplane", "airline", "aircraft", "cockpit", "flight", "cabin", "landing", "aviation"]):
+                effective_top_badge = "AVIATION SECRETS"
+            elif any(w in topic_corpus for w in ["live like royalty", "50/day", "luxury", "villa", "budget luxury"]):
+                effective_top_badge = "BUDGET LUXURY GUIDE"
+            elif any(w in topic_corpus for w in ["underground city", "derinkuyu", "ancient", "mystery", "cappadocia", "civilization", "archaeology", "ruins", "history", "monument"]):
+                effective_top_badge = "ANCIENT MYSTERIES"
+            elif any(w in topic_corpus for w in ["street food", "food", "tacos", "pad thai", "culinary", "bangkok vs"]):
+                effective_top_badge = "STREET FOOD SHOWDOWN"
+            elif any(w in topic_corpus for w in ["train", "railway", "alps", "mountain", "steepest"]):
+                effective_top_badge = "SCENIC EXPEDITIONS"
+            elif raw_badge:
+                effective_top_badge = raw_badge
+            else:
+                effective_top_badge = theme.default_badge
         else:
-            effective_top_badge = theme.default_badge
-    else:
-        effective_top_badge = raw_badge
+            effective_top_badge = raw_badge
 
     scenes = script.get("scenes", [])
     raw_texts = []
@@ -714,11 +747,11 @@ def generate_glassmorphism_subtitles(
         final_card_dur = max(2.20, round(total_dur - running_sum, 3))
         card_durations.append(final_card_dur)
 
-    # Üst rozet ilk 5.5 saniye (kanca evresi) görünür, ardından sinematik ferahlık için zarifçe kaybolur
+    # Üst rozet tam sözleşme penceresinde (badge_start..badge_end, ör: 0.0s - 4.5s) görünür, ardından kaybolur
     accumulated_time = 0.0
     for idx, cdata in enumerate(cards_data):
         dur = card_durations[idx]
-        show_badge = effective_top_badge if accumulated_time < 5.5 else None
+        show_badge = effective_top_badge if (badge_start <= accumulated_time < badge_end) else None
 
         card_img = render_glassmorphic_card(
             cdata["lines"],

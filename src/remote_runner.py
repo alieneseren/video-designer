@@ -9,6 +9,7 @@ Tüm sunucu IP, SSH anahtarı ve bağlantı ayarları ortam değişkenlerinden v
 
 from __future__ import annotations
 import os
+import sys
 import re
 import json
 import time
@@ -19,6 +20,11 @@ import shlex
 import uuid
 from pathlib import Path
 from typing import Optional, Dict, Any
+
+_SRC_DIR = str(Path(__file__).resolve().parent)
+if _SRC_DIR not in sys.path:
+    sys.path.insert(0, _SRC_DIR)
+
 
 
 def _resolve_default_ssh_config() -> tuple[str, str, str, str, str]:

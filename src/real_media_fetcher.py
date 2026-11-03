@@ -1054,19 +1054,41 @@ def fetch_photo_pool(
     target_h: int = 1920,
     session_used: Optional[Set[Any]] = None,
     scene_timeline: Optional[List[Tuple[int, str, float, float]]] = None,
-    cut_duration: float = 2.15
+    cut_duration: float = 2.15,
+    visual_plan: Optional[Dict[str, Any]] = None,
 ) -> List[Path]:
     """
     Tüm video için 2.15s'lik dinamik Ken Burns kesmelerine yetecek sayıda (24-30 adet)
     yüksek çözünürlüklü, semantik olarak %100 uyumlu editoryal fotoğraf toplar.
-    Zaman çizgisi (scene_timeline) ile senkronize çalışır; her kesmeye o an anlatılan
-    sahnenin tam semantik görselini (Chinatown, Al Pastor trompo, bakır kazan carnitas) atar.
+    Zaman çizgisi (scene_timeline) ve VisualDirector şeması ile senkronize çalışır;
+    her kesmeye o an anlatılan sahnenin tam semantik görselini atar.
     """
     from PIL import ImageEnhance
 
     used = session_used if session_used is not None else set()
     pool_dir = Path(work_dir) if work_dir else Path("/tmp/photo_pool")
     pool_dir.mkdir(parents=True, exist_ok=True)
+
+    # 0. VisualDirector Zaman Çizelgesi Entegrasyonu (Yoksa Derle)
+    if visual_plan is None:
+        try:
+            from visual_director import visual_director
+        except ImportError:
+            try:
+                from src.visual_director import visual_director
+            except ImportError:
+                visual_director = None
+        if visual_director is not None:
+            try:
+                visual_plan = visual_director.generate_visual_timeline(
+                    topic=topic,
+                    category=category,
+                    script_data=script_data,
+                    total_duration=target_count * cut_duration,
+                )
+                print(f"[PHOTO-POOL] 🎬 VisualDirector ile {len(visual_plan.get('timeline_scenes', []))} kesmelik plan derlendi.")
+            except Exception as e_vd:
+                print(f"[PHOTO-POOL] VisualDirector derleme uyarısı: {e_vd}")
 
     scenes = script_data.get("scenes") or []
     if not scenes and isinstance(script_data, dict):
@@ -1433,6 +1455,39 @@ def fetch_photo_pool(
                     used.add(c_url)
                     continue
 
+                # ── Önleyici Negatif Anahtar Kelime Bariyeri (OCR, Turist, Alakasız Çapraz Nesneler) ──
+                forb_hit = False
+                if is_cappadocia_topic:
+                    cap_neg_words = [
+                        "blue door", "painted door", "apartment", "door knocker", "wooden door",
+                        "street door", "red car", "convertible", "influencer", "model", "woman in dress",
+                        "orange dress", "hot air balloon", "cctv", "camera", "surveillance",
+                        "red brick", "cellar", "church", "cathedral", "city street"
+                    ]
+                    for w in cap_neg_words:
+                        if w in c_cand_text:
+                            print(f"[PHOTO-POOL] 🚫 Kapadokya negatif filtresi engelledi ({w}): {c_cand_text[:40]}")
+                            forb_hit = True
+                            break
+                elif is_aviation_topic:
+                    avi_neg_words = ["train", "subway", "metro", "bus", "daylight", "bright sun", "blue sky", "propeller", "simulator"]
+                    for w in avi_neg_words:
+                        if w in c_cand_text:
+                            print(f"[PHOTO-POOL] 🚫 Havacılık negatif filtresi engelledi ({w}): {c_cand_text[:40]}")
+                            forb_hit = True
+                            break
+                elif is_luxury_topic:
+                    lux_neg_words = ["iceland", "crater lake", "snow", "cold mountain", "glacier", "mandalay bay", "casino", "las vegas", "eiffel", "paris"]
+                    for w in lux_neg_words:
+                        if w in c_cand_text:
+                            print(f"[PHOTO-POOL] 🚫 Lüks seyahat negatif filtresi engelledi ({w}): {c_cand_text[:40]}")
+                            forb_hit = True
+                            break
+
+                if forb_hit:
+                    used.add(c_url)
+                    continue
+
                 used.add(c_url)  # Bir kez incelenen URL'yi (başarılı veya başarısız) bir daha sorgulama!
 
                 photo_p = pool_dir / f"scene_{sc_idx:02d}_photo_{len(scene_photos[sc_idx]):02d}.jpg"
@@ -1653,6 +1708,36 @@ def fetch_photo_pool(
 
                 fb_is_eye = is_aviation_topic and is_eye_asset(fb_cand_text)
                 if fb_is_eye and eye_photo_count >= MAX_EYE_PHOTOS:
+                    used.add(c_url)
+                    continue
+
+                # ── Önleyici Negatif Anahtar Kelime Bariyeri (Fallback Aşaması) ──
+                fb_forb_hit = False
+                if is_cappadocia_topic:
+                    cap_neg_words = [
+                        "blue door", "painted door", "apartment", "door knocker", "wooden door",
+                        "street door", "red car", "convertible", "influencer", "model", "woman in dress",
+                        "orange dress", "hot air balloon", "cctv", "camera", "surveillance",
+                        "red brick", "cellar", "church", "cathedral", "city street"
+                    ]
+                    for w in cap_neg_words:
+                        if w in fb_cand_text:
+                            fb_forb_hit = True
+                            break
+                elif is_aviation_topic:
+                    avi_neg_words = ["train", "subway", "metro", "bus", "daylight", "bright sun", "blue sky", "propeller", "simulator"]
+                    for w in avi_neg_words:
+                        if w in fb_cand_text:
+                            fb_forb_hit = True
+                            break
+                elif is_luxury_topic:
+                    lux_neg_words = ["iceland", "crater lake", "snow", "cold mountain", "glacier", "mandalay bay", "casino", "las vegas", "eiffel", "paris"]
+                    for w in lux_neg_words:
+                        if w in fb_cand_text:
+                            fb_forb_hit = True
+                            break
+
+                if fb_forb_hit:
                     used.add(c_url)
                     continue
 
