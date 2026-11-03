@@ -67,7 +67,20 @@ except ImportError:
             fallback_engine = None
             asset_fetcher = None
 
-PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "57648418-49ecb0060f2db281a386d04cf")
+def get_pixabay_key() -> str:
+    """Aktif Pixabay API anahtarını ortam değişkeni veya SettingsManager'dan alır."""
+    api_key = os.environ.get("PIXABAY_API_KEY", "").strip()
+    if not api_key:
+        try:
+            from settings_manager import SettingsManager
+            sm = SettingsManager()
+            val = sm.get("pixabay_api_key")
+            if val and str(val).strip():
+                api_key = str(val).strip()
+        except Exception:
+            pass
+    return api_key
+
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 WIKIMEDIA_USER_AGENT = "ShortStudioVideoWorker/2.0 (mailto:alienees@gmail.com)"
 BROWSER_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -257,11 +270,12 @@ def search_wikimedia_sports_media(query: str, limit: int = 10) -> List[str]:
 def search_pixabay_sports_image(query: str, limit: int = 4) -> List[str]:
     """Pixabay üzerinden yüksek çözünürlüklü gerçek basketbol fotoğrafları arar (Çizim ve animasyonlar elenir)."""
     urls = []
-    if not PIXABAY_API_KEY:
+    api_key = get_pixabay_key()
+    if not api_key:
         return urls
     try:
         api_url = (
-            f"https://pixabay.com/api/?key={PIXABAY_API_KEY}"
+            f"https://pixabay.com/api/?key={api_key}"
             f"&q={urllib.parse.quote(query)}"
             f"&image_type=photo&per_page=15&safesearch=true"
         )
@@ -294,7 +308,8 @@ def fetch_pixabay_sports_videos(scratch_dir: Path, target_count: int = 8) -> Lis
     if len(existing) >= target_count:
         return existing
 
-    if not PIXABAY_API_KEY:
+    api_key = get_pixabay_key()
+    if not api_key:
         return existing
 
     queries = [
@@ -309,7 +324,7 @@ def fetch_pixabay_sports_videos(scratch_dir: Path, target_count: int = 8) -> Lis
         if len(candidates) >= target_count * 2:
             break
         params = {
-            "key": PIXABAY_API_KEY,
+            "key": api_key,
             "q": q,
             "video_type": "film",
             "safesearch": "true",

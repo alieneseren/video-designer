@@ -167,12 +167,17 @@ def get_font_safe(size: int = 24, bold: bool = False, mono: bool = False) -> Ima
 
 
 def search_pixabay_general(query: str, exclude_tags: Optional[set] = None) -> Optional[Dict[str, Any]]:
-    try:
-        from settings_manager import SettingsManager
-        sm = SettingsManager()
-        api_key = sm.get("pixabay_api_key") or "57648418-49ecb0060f2db281a386d04cf"
-    except Exception:
-        api_key = "57648418-49ecb0060f2db281a386d04cf"
+    api_key = os.environ.get("PIXABAY_API_KEY", "").strip()
+    if not api_key:
+        try:
+            from settings_manager import SettingsManager
+            sm = SettingsManager()
+            api_key = sm.get("pixabay_api_key", "").strip()
+        except Exception:
+            pass
+
+    if not api_key:
+        return None
 
     if exclude_tags is None:
         exclude_tags = {'toy', 'miniature', 'model', 'figurine', 'doll', 'christmas', 'nutcracker', 'diorama'}

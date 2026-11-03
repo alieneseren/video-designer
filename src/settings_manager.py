@@ -11,6 +11,7 @@ from cryptography.fernet import Fernet
 CONFIG_DIR = Path("config")
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 SECRET_KEY_FILE = CONFIG_DIR / ".secret_key"
+ENV_FILE = Path(".env")
 
 SENSITIVE_FIELDS = {
     "anthropic_api_key",
@@ -18,17 +19,23 @@ SENSITIVE_FIELDS = {
     "nasa_api_key",
     "pixabay_api_key",
     "instagram_access_token",
+    "remote_worker_host",
+    "remote_worker_key_path",
 }
 
 DEFAULT_SETTINGS = {
     "anthropic_api_key": "",
     "gemini_api_key": "",
     "nasa_api_key": "",
-    "pixabay_api_key": "57648418-49ecb0060f2db281a386d04cf",
+    "pixabay_api_key": "",
     "instagram_access_token": "",
     "instagram_user_id": "",
     "instagram_public_base_url": "",
     "instagram_graph_api_version": "v22.0",
+    "remote_worker_host": "",
+    "remote_worker_user": "ubuntu",
+    "remote_worker_key_path": "",
+    "ssh_strict_host_key_checking": "accept-new",
     "ai_provider": "claude",          # claude | gemini | ollama | lmstudio
     "ai_model": "",                    # Boş = provider varsayılanı
     "ollama_url": "http://localhost:11434",
@@ -84,8 +91,23 @@ ALLOWED_KEYS = set(DEFAULT_SETTINGS.keys())
 class SettingsManager:
     def __init__(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        self._load_env()
         self._fernet = self._load_or_create_key()
         self._data = self._load()
+
+    def _load_env(self):
+        """Basit yerel .env okuyucu (dış kütüphane bağımlılığı olmaksızın)."""
+        candidates = [ENV_FILE, Path(__file__).resolve().parent.parent / ".env"]
+        for p in candidates:
+            if p.exists():
+                try:
+                    for line in p.read_text(encoding="utf-8").splitlines():
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            os.environ.setdefault(k.strip(), v.strip().strip("'\""))
+                except Exception:
+                    pass
 
     def _load_or_create_key(self) -> Fernet:
         if SECRET_KEY_FILE.exists():
@@ -145,7 +167,15 @@ class SettingsManager:
         return result
 
     def get(self, key: str, default: str = "") -> str:
-        return self._data.get(key, default)
+        # Öncelik 1: Ortam değişkeni (örn: PIXABAY_API_KEY, REMOTE_WORKER_HOST)
+        env_val = os.environ.get(key.upper())
+        if env_val and str(env_val).strip():
+            return str(env_val).strip()
+        # Öncelik 2: settings.json içindeki saklanan / çözülen değer
+        val = self._data.get(key, default)
+        if val is not None and str(val).strip():
+            return val
+        return default
 
     def update(self, updates: dict):
         for k, v in updates.items():

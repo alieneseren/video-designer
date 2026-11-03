@@ -44,8 +44,19 @@ ASMR_DIR = _find_asmr_dir()
 PIXABAY_HISTORY_FILE = ASMR_DIR / "pixabay_history.json"
 USAGE_HISTORY_FILE = ASMR_DIR / "usage_history.json"
 
-# Pixabay API Anahtarı
-PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "57648418-49ecb0060f2db281a386d04cf")
+def get_pixabay_key() -> str:
+    """Aktif Pixabay API anahtarını ortam değişkeni veya SettingsManager'dan alır."""
+    api_key = os.environ.get("PIXABAY_API_KEY", "").strip()
+    if not api_key:
+        try:
+            from settings_manager import SettingsManager
+            sm = SettingsManager()
+            val = sm.get("pixabay_api_key")
+            if val and str(val).strip():
+                api_key = str(val).strip()
+        except Exception:
+            pass
+    return api_key
 
 # Telifsiz ve filigransız zengin ASMR & Satisfying arama terimleri
 PIXABAY_ASMR_QUERIES = [
@@ -129,10 +140,15 @@ def fetch_fresh_pixabay_asmr_clip(preferred_query: Optional[str] = None) -> Opti
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
+    api_key = get_pixabay_key()
+    if not api_key:
+        print("[ASMR] ⚠️ Pixabay API anahtarı tanımlanmamış. Arama atlanıyor.")
+        return []
+
     for query in queries[:5]:
         try:
             params = {
-                "key": PIXABAY_API_KEY,
+                "key": api_key,
                 "q": query,
                 "video_type": "film",
                 "per_page": 25,

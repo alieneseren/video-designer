@@ -33,9 +33,44 @@ CATEGORY_RULES: Dict[str, Dict[str, List[str]]] = {
     },
     "aviation": {
         "negative_heuristics": [
-            "car traffic", "train on tracks", "ship on ocean", "living room", "food table"
+            "car traffic", "train on tracks", "ship on ocean", "living room", "food table",
+            "oak tree in grass field", "sunny day outdoor grass lawn", "war memorial bronze plaque roll of honour",
+            "building emergency fire stairs staircase", "museum military warplane propeller hanging",
+            "historical black and white propeller plane", "bright blue sky sunny day"
         ],
-        "default_positives": ["commercial airplane in flight", "cockpit instruments", "airport runway"]
+        "default_positives": [
+            "commercial airplane cabin interior night", "commercial airplane landing night approach lights",
+            "human eye pupil macro close-up", "airplane emergency exit door interior cabin",
+            "flight attendant in commercial aircraft cabin"
+        ]
+    },
+    "budget_luxury": {
+        "negative_heuristics": [
+            "iceland volcanic crater lake cold mountains", "nordic glacier cold lake snowy tundra",
+            "las vegas mandalay bay casino resort neon signs", "eiffel tower paris france",
+            "mexican street taco meat al pastor", "fast food burger", "office desk cubicle"
+        ],
+        "default_positives": [
+            "tropical luxury resort private infinity pool villa in bali or vietnam",
+            "luxury tropical resort bedroom with balcony and ocean view",
+            "gourmet dinner dish served at tropical luxury resort",
+            "traditional herbal massage spa therapy in tropical resort",
+            "tropical resort beachfront sunset wooden walkway ocean view"
+        ]
+    },
+    "cappadocia_derinkuyu": {
+        "negative_heuristics": [
+            "modern skyscraper city street cars", "modern hotel room with contemporary furniture",
+            "beach ocean swimming pool tropical resort", "modern office desk computer",
+            "highway road traffic", "modern kitchen", "shopping mall"
+        ],
+        "default_positives": [
+            "cappadocia fairy chimneys rock valley landscape goreme",
+            "derinkuyu ancient underground city carved stone halls rooms",
+            "underground city vertical stone ventilation shaft tunnel",
+            "massive circular rolling millstone defense door in underground stone tunnel",
+            "ancient underground carved stone corridor tunnel with archway"
+        ]
     },
     "crayon_combat": {
         "negative_heuristics": [

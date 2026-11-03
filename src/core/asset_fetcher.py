@@ -63,7 +63,20 @@ COMMERCIAL_STOCK_DOMAINS = [
 ]
 
 BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "57648418-49ecb0060f2db281a386d04cf")
+
+def get_pixabay_key() -> str:
+    """Aktif Pixabay API anahtarını ortam değişkeni veya SettingsManager'dan alır."""
+    api_key = os.environ.get("PIXABAY_API_KEY", "").strip()
+    if not api_key:
+        try:
+            from settings_manager import SettingsManager
+            sm = SettingsManager()
+            val = sm.get("pixabay_api_key")
+            if val and str(val).strip():
+                api_key = str(val).strip()
+        except Exception:
+            pass
+    return api_key
 
 # Spor dışı, kara liste veya alakasız etiketler (Bilet, Salon, Bar ve Yanlış Oyuncu Korumalı)
 BLACK_LISTED_TERMS = [
@@ -249,12 +262,13 @@ class AssetFetcher:
     @classmethod
     def search_pixabay_photos(cls, query: str, limit: int = 5) -> List[str]:
         """Pixabay API üzerinden gerçek basketbol maç fotoğrafları arar."""
-        if not PIXABAY_API_KEY:
+        api_key = get_pixabay_key()
+        if not api_key:
             return []
         try:
             clean_q = re.sub(r'["\']', '', query).strip()
             api_url = (
-                f"https://pixabay.com/api/?key={PIXABAY_API_KEY}"
+                f"https://pixabay.com/api/?key={api_key}"
                 f"&q={urllib.parse.quote(clean_q)}"
                 f"&image_type=photo&per_page=15&safesearch=true"
             )

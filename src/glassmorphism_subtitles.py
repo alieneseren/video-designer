@@ -640,6 +640,8 @@ def generate_glassmorphism_subtitles(
             effective_top_badge = "AVIATION SECRETS"
         elif any(w in topic_corpus for w in ["live like royalty", "50/day", "luxury", "villa", "budget luxury"]):
             effective_top_badge = "BUDGET LUXURY GUIDE"
+        elif any(w in topic_corpus for w in ["underground city", "derinkuyu", "ancient", "mystery", "cappadocia", "civilization", "archaeology", "ruins", "history", "monument"]):
+            effective_top_badge = "ANCIENT MYSTERIES"
         elif any(w in topic_corpus for w in ["street food", "food", "tacos", "pad thai", "culinary", "bangkok vs"]):
             effective_top_badge = "STREET FOOD SHOWDOWN"
         elif any(w in topic_corpus for w in ["train", "railway", "alps", "mountain", "steepest"]):
@@ -712,11 +714,11 @@ def generate_glassmorphism_subtitles(
         final_card_dur = max(2.20, round(total_dur - running_sum, 3))
         card_durations.append(final_card_dur)
 
-    # Üst rozet yayın standardı olarak kartlar boyunca tutarlı kalır (aniden yok olma glitch'i önlendi)
+    # Üst rozet ilk 5.5 saniye (kanca evresi) görünür, ardından sinematik ferahlık için zarifçe kaybolur
     accumulated_time = 0.0
     for idx, cdata in enumerate(cards_data):
         dur = card_durations[idx]
-        show_badge = effective_top_badge
+        show_badge = effective_top_badge if accumulated_time < 5.5 else None
 
         card_img = render_glassmorphic_card(
             cdata["lines"],

@@ -59,8 +59,27 @@ USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36
 WIKIMEDIA_USER_AGENT = "TravelShortsBot/3.1 (https://github.com/alieneseren/video-designer; contact@alieneseren.com) Python-urllib/3.10"
 
 
+def _load_env_file_safe() -> None:
+    """Ortam değişkenleri henüz yüklenmediyse .env dosyasını güvenle yükler."""
+    candidates = [
+        Path(".env"),
+        Path(__file__).resolve().parent / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                for line in p.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        os.environ.setdefault(k.strip(), v.strip().strip("'\""))
+            except Exception:
+                pass
+
+
 def get_pixabay_key() -> str:
-    """SettingsManager üzerinden şifrelenmiş veya düz Pixabay API anahtarını döner."""
+    """SettingsManager (.env / encrypted config) üzerinden Pixabay API anahtarını döner."""
     if SettingsManager is not None:
         try:
             sm = SettingsManager()
@@ -69,7 +88,11 @@ def get_pixabay_key() -> str:
                 return val.strip()
         except Exception as e:
             print(f"[REAL-FETCHER] SettingsManager anahtar okuma hatası: {e}")
-    return os.environ.get("PIXABAY_API_KEY", "57648418-49ecb0060f2db281a386d04cf")
+    key = os.environ.get("PIXABAY_API_KEY", "").strip()
+    if not key:
+        _load_env_file_safe()
+        key = os.environ.get("PIXABAY_API_KEY", "").strip()
+    return key
 
 
 # ─────────────────────────────────────────────────────────────
@@ -162,6 +185,50 @@ UNWANTED_PHOTO_KEYWORDS = [
     "shot on", "mi note", "redmi", "xiaomi", "watermark", "datestamp", "timestamp",
     "copyright", "alamy", "getty", "stock photo", "shutterstock", "depositphotos",
     "dreamstime", "istock", "camera model",
+    # Havacılık: Askeri uçaklar, savaş jetleri, kasklı askeri pilotlar ve hurda uçak mezarlıkları
+    "fighter jet", "fighter aircraft", "military aircraft", "air force", "airforce",
+    "warplane", "combat aircraft", "usaf", "raf", "c-17", "c-130", "c-141",
+    "starlifter", "globemaster", "b-52", "bomber", "f-15", "f-16", "f-18", "f-22", "f-35",
+    "mig-", "sukhoi", "soviet", "russian air", "boneyard", "plane graveyard",
+    "aircraft boneyard", "aircraft graveyard", "abandoned plane", "scrap plane",
+    "derelict plane", "wreck", "crash site", "fighter pilot", "combat pilot",
+    "military pilot", "military helmet", "flight helmet", "visor helmet",
+    "g-suit", "pressure suit", "firefighting plane", "handley page", "hastings",
+    "fema", "air national guard",
+    # Seyahat / Tropikal Lüks: Alakasız kumarhane, Paris, çöl şehirleri, soğuk krater gölleri (Vegas, Eiffel, İzlanda sızıntıları)
+    "vegas", "las vegas", "mandalay", "mandalay bay", "casino", "bellagio",
+    "cirque du soleil", "eiffel", "tour eiffel", "paris", "france", "europe", "dubai", "nevada", "monaco",
+    "iceland", "reykjavik", "nordic", "norway", "fjord", "glacier", "crater lake", "volcanic lake",
+    "volcano crater", "tundra", "cold lake", "arctic", "antarctica", "greenland", "sweden", "finland",
+    # Seyahat / Lüks: Soğuk kapalı havuz, Amerikan tipi ev mutfağı, Bora Bora, yelkenli korsan gemisi
+    "indoor pool", "indoor swimming", "radiator", "pvc window", "heater", "pool cover", "suburban pool",
+    "kitchen", "refrigerator", "fridge", "home kitchen", "apartment kitchen", "bar stools", "microwave", "stove", "oven", "kitchen counter",
+    "borabora", "bora bora", "tahiti", "polynesia", "french polynesia", "otemanu", "maldives overwater",
+    "sailboat", "sailing boat", "ship deck", "pirate ship", "ropes deck", "vessel", "yacht deck", "wooden mast",
+    # Havacılık: Anıt plaketleri, açık hava çimenlikleri, bina yangın merdivenleri, güneşli gündüz sahneleri, spor ayakkabı, CGI, eski pervaneli uçak
+    "oak tree", "tree in field", "tree in grass", "grass lawn", "grass field",
+    "memorial plaque", "roll of honour", "war memorial", "honour roll", "tombstone", "graveyard", "cemetery",
+    "subway stairs", "building stairs", "staircase", "fire escape stairs", "concrete stairs",
+    "sneakers", "running shoes", "sneaker", "shoes", "legs", "passenger legs", "feet", "orange shoes",
+    "propeller plane", "cargo plane", "antique car", "vintage plane", "retro aircraft", "1950s", "1940s", "biplane", "warplane",
+    "cg render", "cgi", "3d render", "3d model", "flight simulator", "simulation", "video game", "unreal engine", "digital rendering",
+    "sunny day", "blue sky", "bright sunshine", "sunlight", "daylight flight", "daytime landing", "bright daylight", "sunny", "daytime boarding", "outdoor tarmac sunny", "sunshine",
+    # Antik yeraltı şehri (Kapadokya/Derinkuyu): Modern bina, mavi apartman kapısı, tuğla kemer, influencer, klasik araba, balon, güvenlik kamerası
+    "modern skyscraper", "contemporary hotel", "modern highway", "traffic jam", "office building",
+    "apartment door", "street door", "wooden door", "blue door", "front door", "painted door", "house door", "residential door", "metal knocker", "porch door", "carved door", "antique door", "neoclassical door", "glass door",
+    "brick", "red brick", "brick arch", "gothic", "cellar", "wine cellar", "cobblestone", "street lamp", "village street", "wooden railing", "log railing", "outdoor stairs", "tourist walkway", "hiking trail stairs", "hiking trail", "forest stairs", "wooden staircase",
+    "influencer", "model posing", "dress posing", "posing in dress", "classic car", "vintage car", "convertible car", "hot air balloon", "balloon flight", "balloons in sky", "flying balloons", "balloon ride", "cappadocia balloon", "sunrise balloon",
+    "cctv", "security camera", "surveillance", "surveillance camera", "camera on wall",
+    # Uzay, roket, Apollo, uydu haritaları & arazi taramaları
+    "apollo", "lunar module", "spacecraft", "satellite map", "satellite photo",
+    "satellite image", "aerial terrain", "topography", "space capsule",
+    "command module", "service module", "space shuttle", "iss", "astronaut",
+    "space station", "nasa museum", "space exhibit", "cosmonaut", "lander",
+    "lunar", "rover", "mars rover", "space probe", "earth from space",
+    "space mission", "outer space", "spacewalk", "skylab", "gemini space",
+    # Ahşap dağ kulübesi sızıntıları (Uçak kabini aramasında sızan dağ evleri)
+    "log cabin", "wooden cabin", "barn", "forest cabin", "chalet", "mountain hut",
+    "snow cabin", "cabin in the woods",
     # Havacılıkta müze balon kapsülleri, tarihi arşiv & siyah-beyaz (Modern uçuş güvenliğinde elenir)
     "gondola", "capsule", "breitling", "orbiter", "museum display", "museum exhibit",
     "vintage 19", "black and white", "bw photo", "monochrome", "balloon", "hot air balloon",
@@ -1036,6 +1103,30 @@ def fetch_photo_pool(
     all_downloaded_photos: List[Path] = []
     accepted_video_hashes: List[int] = []
 
+    # Koltuk Odaklı Görsel Sınırlayıcı (Videonun koltuk kataloğuna dönmesini engeller)
+    seat_photo_count = 0
+    MAX_SEAT_PHOTOS = 2
+
+    # Göz Odaklı Görsel Sınırlayıcı (Videonun göz makrosu kataloğuna dönmesini engeller - max 1 adet)
+    eye_photo_count = 0
+    MAX_EYE_PHOTOS = 1
+
+    def is_seat_asset(text: str) -> bool:
+        return any(re.search(r"\b" + re.escape(w) + r"\b", text, re.IGNORECASE) for w in [
+            "seat", "seats", "seating", "passenger seat", "business seat",
+            "leather seat", "armchair", "airline seats", "airplane seats"
+        ])
+
+    def is_eye_asset(text: str) -> bool:
+        return any(re.search(r"\b" + re.escape(w) + r"\b", text, re.IGNORECASE) for w in [
+            "eye", "eyes", "pupil", "pupils", "iris", "irises", "eyeball", "eyeballs",
+            "human eye", "macro eye", "close up eye", "dilated pupil", "cornea", "retina"
+        ])
+
+    is_aviation_topic = any(w in topic.lower() for w in ["airplane", "airline", "aircraft", "cockpit", "flight", "cabin", "aviation", "landing lights"])
+    is_luxury_topic = any(w in topic.lower() for w in ["live like royalty", "50/day", "fifty dollars", "resort", "luxury", "villa", "budget luxury"])
+    is_cappadocia_topic = any(w in topic.lower() for w in ["cappadocia", "derinkuyu", "kaymakli", "underground city", "fairy chimneys"])
+
     # 3. Her sahne için özel semantik arama sorguları üret
     for sc_idx, sc in enumerate(scenes):
         needed = scene_needed_counts.get(sc_idx, 4)
@@ -1049,93 +1140,166 @@ def fetch_photo_pool(
         scene_queries: List[Dict[str, str]] = []
 
         # A) HAVACILIK & UÇAK KABİNİ (Aviation / Flight Safety) - ÖNCELİKLİ KONTROL
-        if any(w in combined for w in ["airplane", "airline", "aircraft", "cockpit", "flight", "cabin", "landing", "runway", "plane", "aviation", "evacuate", "takeoff"]):
-            if any(w in scene_corpus for w in ["dim", "cabin", "aisle", "light", "interior", "descend", "dark"]):
+        if is_aviation_topic:
+            # 1. SCENE 0: HOOK / GECE İNİŞİ VE KABİN KARARTILMASI (Açılış atmosferi)
+            if sc_idx == 0:
                 scene_queries.extend([
-                    {"source": "wikimedia", "query": "airplane cabin interior night"},
-                    {"source": "wikimedia", "query": "aircraft cabin passenger seats"},
-                    {"source": "wikimedia", "query": "commercial airplane cabin interior"},
-                    {"source": "pixabay_photo", "query": "airplane cabin night"},
-                    {"source": "pixabay_photo", "query": "airplane cabin interior"},
-                    {"source": "pixabay_photo", "query": "aircraft cabin passenger"}
+                    {"source": "wikimedia", "query": "Boeing 737 cabin night"},
+                    {"source": "wikimedia", "query": "commercial airplane cabin interior night"},
+                    {"source": "wikimedia", "query": "JetBlue A220 - Interior (cabin)"},
+                    {"source": "wikimedia", "query": "aircraft cabin darkness night"},
+                    {"source": "pixabay_photo", "query": "airplane cabin interior night"},
+                    {"source": "wikimedia", "query": "aircraft cabin passenger seats night"}
                 ])
-            elif any(w in scene_corpus for w in ["takeoff", "landing", "wing", "engine", "runway", "window"]):
+            # 2. SCENE 1: İNİŞ, KALKIŞ, KANAT, FLAŞÖR VE PİST YAKLAŞMA IŞIKLARI
+            elif sc_idx == 1:
                 scene_queries.extend([
-                    {"source": "wikimedia", "query": "airplane window night wing"},
-                    {"source": "wikimedia", "query": "cockpit night landing runway"},
-                    {"source": "wikimedia", "query": "airport runway night"},
-                    {"source": "pixabay_photo", "query": "airplane runway lights night"},
-                    {"source": "pixabay_photo", "query": "airplane wing sunset flying"},
-                    {"source": "pixabay_photo", "query": "airplane takeoff night"}
+                    {"source": "wikimedia", "query": "commercial airplane landing night approach"},
+                    {"source": "wikimedia", "query": "airport runway night approach lights"},
+                    {"source": "wikimedia", "query": "Approach Lighting System"},
+                    {"source": "pixabay_photo", "query": "airplane window night lights flight"},
+                    {"source": "wikimedia", "query": "airliner wing night city lights approach"},
+                    {"source": "pixabay_photo", "query": "airplane runway lights night"}
                 ])
-            elif any(w in scene_corpus for w in ["eye", "vision", "adapt", "pupil"]):
+            # 3. SCENE 2: İNSAN BİYOLOJİSİ, GÖZ BEBEĞİ, KARANLIĞA UYUM (Maksimum 1 göz makrosu, geri kalanı loş kabin)
+            elif sc_idx == 2:
                 scene_queries.extend([
-                    {"source": "wikimedia", "query": "human eye pupil close up"},
-                    {"source": "wikimedia", "query": "airplane emergency lighting cabin"},
-                    {"source": "pixabay_photo", "query": "eye pupil macro close up"},
-                    {"source": "pixabay_photo", "query": "airplane cabin dark night"}
+                    {"source": "wikimedia", "query": "human eye pupil iris macro"},
+                    {"source": "wikimedia", "query": "commercial airplane cabin interior night"},
+                    {"source": "wikimedia", "query": "aircraft cabin darkness night"},
+                    {"source": "wikimedia", "query": "Boeing 737 cabin night"},
+                    {"source": "pixabay_photo", "query": "airplane cabin dim lighting flight"},
+                    {"source": "wikimedia", "query": "aircraft passenger window night flight"}
                 ])
-            elif any(w in scene_corpus for w in ["evacuate", "emergency", "exit", "escape", "obstacle", "slide"]):
+            # 4. SCENE 3: ACİL ÇIKIŞ KAPILARI, ZEMİN TAHLİYE AYDINLATMASI VE IŞIKLI ÇIKIŞ LEVHALARI
+            elif sc_idx == 3:
                 scene_queries.extend([
-                    {"source": "wikimedia", "query": "airplane emergency exit lights cabin"},
-                    {"source": "wikimedia", "query": "aircraft passenger emergency door"},
-                    {"source": "pixabay_photo", "query": "airplane emergency lighting"},
-                    {"source": "pixabay_photo", "query": "airplane cabin dark aisle"}
+                    {"source": "wikimedia", "query": "Emergency exit door aircraft"},
+                    {"source": "wikimedia", "query": "Easyjet a319 overwing exit path"},
+                    {"source": "wikimedia", "query": "A320 Door 2L"},
+                    {"source": "wikimedia", "query": "Emergency exit row aircraft"},
+                    {"source": "wikimedia", "query": "aircraft emergency exit door interior"},
+                    {"source": "pixabay_photo", "query": "airplane emergency exit row door"}
                 ])
-            elif any(w in scene_corpus for w in ["attendant", "crew", "overhead", "passenger", "procedure"]):
+            # 5. SCENE 4: KABİN MEMURU, UÇUŞ EKİBİ VE BAŞÜSTÜ DOLAPLARI
+            elif sc_idx == 4:
                 scene_queries.extend([
                     {"source": "wikimedia", "query": "flight attendant cabin aircraft"},
-                    {"source": "wikimedia", "query": "passenger aircraft cabin aisle"},
                     {"source": "pixabay_photo", "query": "flight attendant airplane interior"},
-                    {"source": "pixabay_photo", "query": "air hostess cabin service"}
+                    {"source": "wikimedia", "query": "cabin crew airline commercial"},
+                    {"source": "pixabay_photo", "query": "airplane window evening sunset flight"}
                 ])
+            # 6. GENEL HAVACILIK YEDEK SORGULARI
             else:
                 scene_queries.extend([
-                    {"source": "wikimedia", "query": "airplane cabin interior night"},
-                    {"source": "pixabay_photo", "query": "airplane window night wing"},
-                    {"source": "wikimedia", "query": "cockpit night landing runway"},
-                    {"source": "pixabay_photo", "query": "airplane flight night"}
+                    {"source": "wikimedia", "query": "commercial airplane cabin interior night"},
+                    {"source": "wikimedia", "query": "Boeing 737 cabin night"},
+                    {"source": "pixabay_photo", "query": "airplane window night lights flight"},
+                    {"source": "wikimedia", "query": "airport runway night approach lights"},
+                    {"source": "pixabay_photo", "query": "airplane cabin night dim"}
                 ])
 
-        # B) LÜKS SEYAHAT, RESORT & VİLLA (5 Countries / Budget Luxury)
-        elif any(w in combined for w in ["live like royalty", "50/day", "fifty dollars", "resort", "resorts", "luxury", "villa", "bali", "vietnam", "sri lanka", "budget"]):
-            if sc_idx == 0 or any(w in scene_corpus for w in ["infinity pool", "routine", "fifty dollars", "paradise", "five-star"]):
+        # B) LÜKS SEYAHAT, RESORT & VİLLA (5 Countries / Budget Luxury - Geo-Locked to SE Asia)
+        elif is_luxury_topic or any(w in combined for w in ["live like royalty", "50/day", "fifty dollars", "resort", "resorts", "luxury", "villa", "bali", "vietnam", "sri lanka", "budget"]):
+            if sc_idx == 0:
                 scene_queries.extend([
-                    {"source": "pixabay_photo", "query": "infinity pool tropical resort luxury"},
-                    {"source": "wikimedia", "query": "infinity pool tropical resort"},
-                    {"source": "pixabay_photo", "query": "luxury resort swimming pool tropical"},
-                    {"source": "pixabay_photo", "query": "luxury villa pool tropical"},
-                    {"source": "wikimedia", "query": "tropical resort pool luxury"}
+                    {"source": "pixabay_photo", "query": "bali luxury private pool villa"},
+                    {"source": "wikimedia", "query": "InterContinental Danang Sun Peninsula Resort"},
+                    {"source": "pixabay_photo", "query": "tropical infinity pool ocean sunset luxury"},
+                    {"source": "wikimedia", "query": "tropical resort infinity pool luxury"},
+                    {"source": "pixabay_photo", "query": "phuket private pool villa luxury"}
                 ])
-            elif any(w in scene_corpus for w in ["bali", "vietnam", "villa", "carved", "massage"]):
+            elif sc_idx == 1:
+                # Sıralama: Önce Bali/Vietnam cliffside havuzlu villa, ardından masaj / gurme
                 scene_queries.extend([
-                    {"source": "pixabay_photo", "query": "bali luxury resort villa pool"},
-                    {"source": "wikimedia", "query": "bali luxury villa pool"},
-                    {"source": "pixabay_photo", "query": "traditional spa herbal massage therapy"},
-                    {"source": "pixabay_photo", "query": "vietnam tropical resort beach"},
-                    {"source": "pixabay_photo", "query": "ubud bali luxury resort"}
+                    {"source": "pixabay_photo", "query": "bali ubud luxury villa pool"},
+                    {"source": "wikimedia", "query": "InterContinental Danang Sun Peninsula Resort"},
+                    {"source": "pixabay_photo", "query": "vietnam beachfront luxury resort da nang"},
+                    {"source": "pixabay_photo", "query": "gourmet chef meal fine dining resort"},
+                    {"source": "pixabay_photo", "query": "traditional herbal massage spa therapy"},
+                    {"source": "wikimedia", "query": "bali luxury resort villa"}
                 ])
-            elif any(w in scene_corpus for w in ["thailand", "sri lanka", "balcony", "palm", "plantation", "colonial"]):
+            elif sc_idx == 2:
                 scene_queries.extend([
-                    {"source": "wikimedia", "query": "sri lanka tropical resort beach"},
-                    {"source": "pixabay_photo", "query": "sri lanka palm beach resort"},
-                    {"source": "pixabay_photo", "query": "thailand luxury resort ocean view"},
-                    {"source": "pixabay_photo", "query": "phuket luxury resort balcony sea"},
-                    {"source": "wikimedia", "query": "sri lanka tea plantation hillside"}
+                    {"source": "pixabay_photo", "query": "sri lanka palm beach tropical resort"},
+                    {"source": "wikimedia", "query": "sri lanka tropical coastline palms beach"},
+                    {"source": "pixabay_photo", "query": "chiang mai luxury resort mountain"},
+                    {"source": "pixabay_photo", "query": "thailand luxury resort ocean balcony"},
+                    {"source": "wikimedia", "query": "sri lanka tea plantation hillside"},
+                    {"source": "pixabay_photo", "query": "mirissa sri lanka tropical beach resort"}
                 ])
-            elif any(w in scene_corpus for w in ["dining", "hospitality", "beachfront", "pennies", "seafood"]):
+            elif sc_idx == 3:
                 scene_queries.extend([
-                    {"source": "pixabay_photo", "query": "luxury beachfront dining table sunset"},
-                    {"source": "pixabay_photo", "query": "tropical resort beachfront restaurant dinner"},
+                    {"source": "pixabay_photo", "query": "luxury beachfront dining sunset tropical"},
+                    {"source": "pixabay_photo", "query": "candlelight beach dinner tropical resort"},
                     {"source": "wikimedia", "query": "beachfront restaurant luxury tropical"},
-                    {"source": "pixabay_photo", "query": "candlelight beach dinner tropical"}
+                    {"source": "pixabay_photo", "query": "tropical resort beachfront restaurant dinner"},
+                    {"source": "pixabay_photo", "query": "fresh grilled seafood platter restaurant"}
+                ])
+            elif sc_idx == 4:
+                scene_queries.extend([
+                    {"source": "pixabay_photo", "query": "tropical luxury resort wooden walkway ocean"},
+                    {"source": "pixabay_photo", "query": "wooden deck ocean sunset traveler"},
+                    {"source": "pixabay_photo", "query": "bali infinity pool sunset view"},
+                    {"source": "wikimedia", "query": "tropical resort ocean view landscape"},
+                    {"source": "pixabay_photo", "query": "tropical island sunset pool villa"}
                 ])
             else:
                 scene_queries.extend([
-                    {"source": "pixabay_photo", "query": "tropical resort sunset panorama traveler"},
-                    {"source": "pixabay_photo", "query": "luxury travel destination tropical viewpoint"},
-                    {"source": "wikimedia", "query": "tropical beach resort sunset landscape"},
-                    {"source": "pixabay_photo", "query": "wooden deck ocean sunset traveler"}
+                    {"source": "pixabay_photo", "query": "bali luxury private pool villa"},
+                    {"source": "wikimedia", "query": "tropical resort infinity pool luxury"},
+                    {"source": "pixabay_photo", "query": "tropical luxury resort wooden walkway ocean"}
+                ])
+
+        # C) KAPADOKYA & DERİNKUYU 18 KATLI YERALTI ŞEHRİ (Cappadocia / Derinkuyu Subterranean City)
+        elif is_cappadocia_topic or any(w in combined for w in ["cappadocia", "derinkuyu", "kaymakli", "underground city", "fairy chimneys"]):
+            if sc_idx == 0:
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "Cappadocia Chimneys Wikimedia Commons"},
+                    {"source": "wikimedia", "query": "Goreme valley Cappadocia fairy chimneys twilight"},
+                    {"source": "wikimedia", "query": "Cappadocia Goreme hike red valley fairy chimneys badlands"},
+                    {"source": "wikimedia", "query": "Cappadocia fairy chimneys landscape Goreme"},
+                    {"source": "pixabay_photo", "query": "cappadocia fairy chimneys landscape valley"}
+                ])
+            elif sc_idx == 1:
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "Derinkuyu Underground City Türkiye"},
+                    {"source": "wikimedia", "query": "DerinkuyuUndergroundCity02"},
+                    {"source": "wikimedia", "query": "Derinkuyu underground city stone halls rooms"},
+                    {"source": "wikimedia", "query": "Kaymakli underground city 8891 Nevit"},
+                    {"source": "wikimedia", "query": "Kaymakli underground city carved rooms tunnels"},
+                    {"source": "wikimedia", "query": "Derinkuyu underground city carved rock"}
+                ])
+            elif sc_idx == 2:
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "Derinkuyu underground city ventilation shaft"},
+                    {"source": "wikimedia", "query": "Derinkuyu underground city shaft tunnel"},
+                    {"source": "wikimedia", "query": "Kaymakli underground city tunnel corridor"},
+                    {"source": "wikimedia", "query": "DerinkuyuUndergroundCity02"},
+                    {"source": "wikimedia", "query": "underground city stone stairs tunnel Cappadocia"}
+                ])
+            elif sc_idx == 3:
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "Derinkuyu door"},
+                    {"source": "wikimedia", "query": "Kaymakli door"},
+                    {"source": "wikimedia", "query": "A circular door at Kaymakli Underground City"},
+                    {"source": "wikimedia", "query": "Derinkuyu Underground City 9843 Nevit Enhancer"},
+                    {"source": "wikimedia", "query": "Derinkuyu rolling stone door underground city"},
+                    {"source": "wikimedia", "query": "Kaymakli underground city circular stone door"}
+                ])
+            elif sc_idx == 4:
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "Derinkuyu Underground City"},
+                    {"source": "wikimedia", "query": "Derinkuyu underground city corridor depth"},
+                    {"source": "wikimedia", "query": "Kaymakli underground city corridor depth"},
+                    {"source": "wikimedia", "query": "Derinkuyu underground city carved rock"},
+                    {"source": "wikimedia", "query": "underground city cave carved tunnel Cappadocia"}
+                ])
+            else:
+                scene_queries.extend([
+                    {"source": "wikimedia", "query": "Derinkuyu Underground City Türkiye"},
+                    {"source": "wikimedia", "query": "Kaymakli underground city carved rooms tunnels"},
+                    {"source": "wikimedia", "query": "Cappadocia Chimneys Wikimedia Commons"}
                 ])
 
         # C) BANGKOK VS MEXICO CITY SOKAK LEZZETLERİ (Yalnızca bu konuya özel)
@@ -1244,9 +1408,9 @@ def fetch_photo_pool(
             q_str = q_item["query"]
             candidates = []
             if src == "wikimedia":
-                candidates = search_wikimedia_commons_photos(q_str, exclude_urls=used.union(downloaded_urls), limit=3)
+                candidates = search_wikimedia_commons_photos(q_str, exclude_urls=used.union(downloaded_urls), limit=6)
             elif src == "pixabay_photo":
-                candidates = search_pixabay_photos(q_str, exclude_ids=used.union(downloaded_urls), limit=3)
+                candidates = search_pixabay_photos(q_str, exclude_ids=used.union(downloaded_urls), limit=6)
 
             for cand in candidates:
                 if len(scene_photos[sc_idx]) >= needed + 2:
@@ -1254,6 +1418,21 @@ def fetch_photo_pool(
                 c_url = cand.get("url")
                 if not c_url or c_url in downloaded_urls or c_url in used:
                     continue
+
+                # Koltuk ve Göz filtresi (Havacılıkta max 2 koltuk, max 1 göz makrosu kuralı)
+                c_cand_text = f"{cand.get('title', '')} {cand.get('tags', '')} {q_str}".lower()
+                cand_is_seat = is_aviation_topic and is_seat_asset(c_cand_text)
+                if cand_is_seat and seat_photo_count >= MAX_SEAT_PHOTOS:
+                    print(f"[PHOTO-POOL] 🚫 Koltuk kotası dolu (max {MAX_SEAT_PHOTOS}), atlandı: {c_cand_text[:40]}")
+                    used.add(c_url)
+                    continue
+
+                cand_is_eye = is_aviation_topic and is_eye_asset(c_cand_text)
+                if cand_is_eye and eye_photo_count >= MAX_EYE_PHOTOS:
+                    print(f"[PHOTO-POOL] 🚫 Göz kotası dolu (max {MAX_EYE_PHOTOS}), atlandı: {c_cand_text[:40]}")
+                    used.add(c_url)
+                    continue
+
                 used.add(c_url)  # Bir kez incelenen URL'yi (başarılı veya başarısız) bir daha sorgulama!
 
                 photo_p = pool_dir / f"scene_{sc_idx:02d}_photo_{len(scene_photos[sc_idx]):02d}.jpg"
@@ -1277,6 +1456,76 @@ def fetch_photo_pool(
                             photo_p.unlink()
                         continue
 
+                    # ── Semantik Görsel Doğrulama (CLIP Model Kontrolü) ──
+                    if visual_guard and visual_guard.semantic_model_available:
+                        pos_list = [f"a photograph of {narr[:60]}", f"an authentic scene showing {narr[:60]}"]
+                        if is_aviation_topic:
+                            if sc_idx == 0:
+                                pos_list = ["commercial airplane cabin interior night dim lights", "passengers in commercial airplane cabin night"]
+                            elif sc_idx == 1:
+                                pos_list = ["commercial airplane landing at night runway approach lights", "airliner wing with strobe lights night approach"]
+                            elif sc_idx == 2:
+                                pos_list = ["human eye pupil dilation iris macro close up", "human eye in darkness vision pupil"]
+                            elif sc_idx == 3:
+                                pos_list = ["airplane emergency exit door inside cabin", "aircraft cabin floor emergency path lighting"]
+                            elif sc_idx == 4:
+                                pos_list = ["flight attendant checking commercial airplane cabin", "cabin crew in aircraft aisle night"]
+                        elif is_luxury_topic:
+                            if sc_idx == 0:
+                                pos_list = ["tropical luxury resort infinity pool overlooking jungle sunrise", "private plunge pool villa"]
+                            elif sc_idx == 1:
+                                pos_list = ["tropical luxury villa private pool bali vietnam", "traditional herbal massage spa therapy", "gourmet chef meal dining"]
+                            elif sc_idx == 2:
+                                pos_list = ["sri lanka luxury tea plantation hillside resort balcony", "thailand mountain luxury resort"]
+                            elif sc_idx == 3:
+                                pos_list = ["luxury beachfront dinner candlelight seafood platter", "tropical beach restaurant evening dining"]
+                            elif sc_idx == 4:
+                                pos_list = ["traveler on wooden deck over turquoise tropical ocean sunset", "luxury tropical resort ocean walkway"]
+                        elif is_cappadocia_topic:
+                            if sc_idx == 0:
+                                pos_list = ["cappadocia fairy chimneys rock formations goreme landscape twilight", "cappadocia landscape"]
+                            elif sc_idx == 1:
+                                pos_list = ["derinkuyu underground city carved stone halls rooms", "ancient carved stone chambers underground"]
+                            elif sc_idx == 2:
+                                pos_list = ["derinkuyu underground city vertical ventilation shaft tunnel", "underground stone tunnel shaft"]
+                            elif sc_idx == 3:
+                                pos_list = ["massive circular rolling millstone defense door in underground stone tunnel", "ancient round stone door derinkuyu"]
+                            elif sc_idx == 4:
+                                pos_list = ["deep descending underground carved stone corridor tunnel mystery", "ancient underground city tunnel"]
+
+                        neg_list = [
+                            "oak tree in sunny grass field park",
+                            "war memorial bronze plaque roll of honour names",
+                            "building emergency fire escape concrete stairs",
+                            "museum military warplane propeller exhibit",
+                            "bright blue sky sunny day outdoor",
+                            "iceland volcanic crater lake cold mountains",
+                            "nordic glacier snowy mountain cold lake",
+                            "las vegas casino hotel neon signs mandalay bay",
+                            "eiffel tower paris france",
+                            "modern skyscraper cars traffic highway",
+                            "office desk computer keyboard",
+                            "apartment entrance wooden door modern blue painted door",
+                            "brick arch red brick cellar gothic church corridor",
+                            "red convertible car model woman influencer dress",
+                            "hot air balloons floating in sky",
+                            "cctv surveillance security camera wall mount",
+                            "human legs feet orange sneakers running shoes",
+                            "1950s antique car vintage propeller cargo plane",
+                            "3d computer graphics render flight simulator",
+                            "suburban indoor pool blue plastic cover radiator",
+                            "residential kitchen refrigerator fridge bar stools",
+                            "wooden pirate sailboat ship ropes deck mast",
+                            "bora bora french polynesia overwater bungalow"
+                        ]
+
+                        clip_res = visual_guard.score_image_against_prompts(cand_im, pos_list, neg_list)
+                        if not clip_res.get("is_accepted", True):
+                            print(f"[PHOTO-POOL] 🚫 CLIP semantik filtresi reddetti: {photo_p.name} [{cand.get('title', '')[:30]}] (pos={clip_res.get('score')}, neg={clip_res.get('negative_score')})")
+                            if photo_p.is_file():
+                                photo_p.unlink()
+                            continue
+
                     # Canlılık ve kontrast zenginleştirme
                     enh_im = ImageEnhance.Contrast(cand_im).enhance(1.06)
                     enh_im = ImageEnhance.Color(enh_im).enhance(1.10)
@@ -1285,6 +1534,10 @@ def fetch_photo_pool(
                 except Exception as ex:
                     print(f"[PHOTO-POOL] Görsel işleme uyarısı: {ex}")
 
+                if cand_is_seat:
+                    seat_photo_count += 1
+                if cand_is_eye:
+                    eye_photo_count += 1
                 scene_photos[sc_idx].append(photo_p)
                 all_downloaded_photos.append(photo_p)
                 downloaded_urls.add(c_url)
@@ -1302,38 +1555,62 @@ def fetch_photo_pool(
         print(f"[PHOTO-POOL] ⚠️ Havuz kotası eksik ({len(all_downloaded_photos)}/{target_count}, +{needed_extra} gerekli). Ek genişletilmiş semantik arama başlatılıyor...")
         
         fallback_queries: List[Dict[str, str]] = []
-        is_aviation = any(w in topic.lower() for w in ["airplane", "airline", "aircraft", "cockpit", "flight", "cabin", "aviation"])
-        is_luxury = any(w in topic.lower() for w in ["royalty", "50", "luxury", "villa", "resort", "hotel"])
+        is_luxury = is_luxury_topic or any(w in topic.lower() for w in ["royalty", "50", "luxury", "villa", "resort", "hotel"])
 
-        if is_aviation:
+        if is_aviation_topic:
             fallback_queries.extend([
-                {"source": "wikimedia", "query": "commercial aircraft cabin night"},
-                {"source": "pixabay_photo", "query": "airplane cabin interior seats"},
-                {"source": "wikimedia", "query": "airplane interior dark night"},
-                {"source": "pixabay_photo", "query": "aircraft cabin passenger seats"},
-                {"source": "wikimedia", "query": "cockpit aircraft dashboard night"},
-                {"source": "pixabay_photo", "query": "airplane flying sunset sky"},
-                {"source": "wikimedia", "query": "airport runway lights night"},
-                {"source": "pixabay_photo", "query": "airplane window cloud view"},
-                {"source": "pixabay_photo", "query": "aircraft landing night runway lights"},
-                {"source": "wikimedia", "query": "airliner passenger seats cabin"},
-                {"source": "pixabay_photo", "query": "airplane pilot cockpit view night"},
-                {"source": "wikimedia", "query": "airplane night flight approach"},
-                {"source": "pixabay_photo", "query": "jet airplane wing evening twilight"},
-                {"source": "wikimedia", "query": "aircraft interior cabin aisle seats"},
-                {"source": "pixabay_photo", "query": "airplane landing gear night airport"},
-                {"source": "wikimedia", "query": "airplane travel airport departure night"}
+                {"source": "wikimedia", "query": "commercial aircraft cabin darkness night"},
+                {"source": "pixabay_photo", "query": "commercial airplane landing night approach"},
+                {"source": "wikimedia", "query": "aircraft emergency exit door interior"},
+                {"source": "pixabay_photo", "query": "airplane window night lights flight"},
+                {"source": "wikimedia", "query": "airport runway night approach lights"},
+                {"source": "pixabay_photo", "query": "airplane flying sunset sky wing"},
+                {"source": "wikimedia", "query": "commercial airliner wing night city lights"},
+                {"source": "pixabay_photo", "query": "airplane cabin darkness night"},
+                {"source": "wikimedia", "query": "airplane cabin dim lighting flight"},
+                {"source": "wikimedia", "query": "Boeing 737 cabin night"},
+                {"source": "wikimedia", "query": "Easyjet a319 overwing exit path"},
+                {"source": "pixabay_photo", "query": "airplane night flight sky view"},
+                {"source": "wikimedia", "query": "aircraft cabin aisle dark night"},
+                {"source": "pixabay_photo", "query": "airplane window dark clouds sunset"},
+                {"source": "wikimedia", "query": "airport tarmac night aircraft lights"},
+                {"source": "pixabay_photo", "query": "commercial airplane jet twilight evening"},
+                {"source": "wikimedia", "query": "Emergency exit row aircraft"},
+                {"source": "pixabay_photo", "query": "flight attendant serving cabin"},
+                {"source": "wikimedia", "query": "commercial airliner illuminated runway night"},
+                {"source": "pixabay_photo", "query": "airplane landing gear night tarmac"}
+            ])
+        elif is_cappadocia_topic:
+            fallback_queries.extend([
+                {"source": "wikimedia", "query": "Derinkuyu underground city Cappadocia"},
+                {"source": "wikimedia", "query": "Kaymakli underground city carved stone"},
+                {"source": "wikimedia", "query": "DerinkuyuUndergroundCity02"},
+                {"source": "wikimedia", "query": "Derinkuyu door"},
+                {"source": "wikimedia", "query": "Kaymakli door"},
+                {"source": "wikimedia", "query": "A circular door at Kaymakli Underground City"},
+                {"source": "pixabay_photo", "query": "cappadocia fairy chimneys rock formations"},
+                {"source": "wikimedia", "query": "Derinkuyu subterranean halls"},
+                {"source": "wikimedia", "query": "Derinkuyu Underground City Türkiye"},
+                {"source": "pixabay_photo", "query": "goreme cappadocia landscape twilight"}
             ])
         elif is_luxury:
             fallback_queries.extend([
-                {"source": "pixabay_photo", "query": "luxury villa infinity pool tropical"},
-                {"source": "wikimedia", "query": "tropical beach resort sunset"},
-                {"source": "pixabay_photo", "query": "luxury resort hotel bedroom suite"},
-                {"source": "pixabay_photo", "query": "tropical island palm beach"},
-                {"source": "wikimedia", "query": "bali luxury resort tropical"},
-                {"source": "pixabay_photo", "query": "luxury beachfront villa sunset"},
-                {"source": "wikimedia", "query": "sri lanka beach palm resort"},
-                {"source": "pixabay_photo", "query": "tropical resort pool landscape"}
+                {"source": "pixabay_photo", "query": "bali luxury resort private pool"},
+                {"source": "wikimedia", "query": "bali luxury villa pool tropical"},
+                {"source": "pixabay_photo", "query": "vietnam beachfront resort tropical"},
+                {"source": "pixabay_photo", "query": "sri lanka palm beach resort coastline"},
+                {"source": "wikimedia", "query": "tropical resort infinity pool ocean sunset"},
+                {"source": "pixabay_photo", "query": "ubud bali jungle luxury villa"},
+                {"source": "pixabay_photo", "query": "phuket luxury villa private pool"},
+                {"source": "wikimedia", "query": "chiang mai traditional luxury resort mountain"},
+                {"source": "pixabay_photo", "query": "tropical beachfront restaurant sunset dining"},
+                {"source": "pixabay_photo", "query": "traditional spa herbal therapy bath"},
+                {"source": "wikimedia", "query": "sri lanka mirissa tropical beach palm trees"},
+                {"source": "pixabay_photo", "query": "luxury resort wooden deck ocean"},
+                {"source": "pixabay_photo", "query": "tropical island sunset pool villa"},
+                {"source": "wikimedia", "query": "da nang beachfront luxury resort swimming pool"},
+                {"source": "pixabay_photo", "query": "tropical ocean villa private pool"},
+                {"source": "pixabay_photo", "query": "candlelight dinner on tropical beach sunset"}
             ])
         else:
             for sc in scenes:
@@ -1347,7 +1624,7 @@ def fetch_photo_pool(
                     fallback_queries.append({"source": "wikimedia", "query": q_phrase})
 
         fb_idx = 0
-        max_fb_attempts = max(40, len(fallback_queries) * 6)
+        max_fb_attempts = max(50, len(fallback_queries) * 6)
         while len(all_downloaded_photos) < target_count and fb_idx < max_fb_attempts and fallback_queries:
             q_item = fallback_queries[fb_idx % len(fallback_queries)]
             fb_idx += 1
@@ -1366,6 +1643,19 @@ def fetch_photo_pool(
                 c_url = cand.get("url")
                 if not c_url or c_url in downloaded_urls or c_url in used:
                     continue
+
+                # Koltuk ve Göz filtresi (Fallback aşamasında da sınırlandır)
+                fb_cand_text = f"{cand.get('title', '')} {cand.get('tags', '')} {q_str}".lower()
+                fb_is_seat = is_aviation_topic and is_seat_asset(fb_cand_text)
+                if fb_is_seat and seat_photo_count >= MAX_SEAT_PHOTOS:
+                    used.add(c_url)
+                    continue
+
+                fb_is_eye = is_aviation_topic and is_eye_asset(fb_cand_text)
+                if fb_is_eye and eye_photo_count >= MAX_EYE_PHOTOS:
+                    used.add(c_url)
+                    continue
+
                 used.add(c_url)  # Bir kez denenen görseli kota döngüsünde de tekrar deneme!
 
                 photo_p = pool_dir / f"extra_quota_photo_{len(all_downloaded_photos):02d}.jpg"
@@ -1386,6 +1676,47 @@ def fetch_photo_pool(
                             photo_p.unlink()
                         continue
 
+                    # ── Semantik Görsel Doğrulama (CLIP Model Kontrolü) ──
+                    if visual_guard and visual_guard.semantic_model_available:
+                        fb_pos = ["authentic photographic scene", q_str]
+                        fb_neg = [
+                            "oak tree in sunny grass field park",
+                            "war memorial bronze plaque roll of honour names",
+                            "building emergency fire escape concrete stairs",
+                            "museum military warplane propeller exhibit",
+                            "bright blue sky sunny day outdoor",
+                            "iceland volcanic crater lake cold mountains",
+                            "nordic glacier snowy mountain cold lake",
+                            "las vegas casino hotel neon signs mandalay bay",
+                            "eiffel tower paris france",
+                            "modern skyscraper cars traffic highway",
+                            "office desk computer keyboard",
+                            "apartment entrance wooden door modern blue painted door",
+                            "brick arch red brick cellar gothic church corridor",
+                            "red convertible car model woman influencer dress",
+                            "hot air balloons floating in sky",
+                            "cctv surveillance security camera wall mount",
+                            "human legs feet orange sneakers running shoes",
+                            "1950s antique car vintage propeller cargo plane",
+                            "3d computer graphics render flight simulator",
+                            "suburban indoor pool blue plastic cover radiator",
+                            "residential kitchen refrigerator fridge bar stools",
+                            "wooden pirate sailboat ship ropes deck mast",
+                            "bora bora french polynesia overwater bungalow"
+                        ]
+                        if is_aviation_topic:
+                            fb_pos = ["commercial airplane cabin interior night", "commercial airplane night approach lights", "airplane flight night"]
+                        elif is_cappadocia_topic:
+                            fb_pos = ["cappadocia fairy chimneys landscape", "derinkuyu ancient underground city carved stone tunnels"]
+                        elif is_luxury:
+                            fb_pos = ["tropical luxury resort villa pool", "tropical beachfront restaurant ocean view"]
+
+                        clip_res = visual_guard.score_image_against_prompts(cand_im, fb_pos, fb_neg)
+                        if not clip_res.get("is_accepted", True):
+                            if photo_p.is_file():
+                                photo_p.unlink()
+                            continue
+
                     enh_im = ImageEnhance.Contrast(cand_im).enhance(1.06)
                     enh_im = ImageEnhance.Color(enh_im).enhance(1.10)
                     enh_im.save(photo_p, "JPEG", quality=92)
@@ -1393,11 +1724,148 @@ def fetch_photo_pool(
                 except Exception:
                     pass
 
+                if fb_is_seat:
+                    seat_photo_count += 1
+                if fb_is_eye:
+                    eye_photo_count += 1
                 all_downloaded_photos.append(photo_p)
                 downloaded_urls.add(c_url)
                 used.add(c_url)
                 print(f"[PHOTO-POOL] ➕ Ek kota editoryal görseli bağlandı ({len(all_downloaded_photos)}/{target_count}): {photo_p.name} [{src}: '{q_str}']")
                 break
+
+    # İkinci Faz: Havuz kotası hâlâ eksikse dinamik token bazlı genişletme ile %100 doldur
+    if len(all_downloaded_photos) < target_count:
+        token_pool = []
+        if is_aviation_topic:
+            token_pool = [
+                "commercial airplane cabin night", "airplane night landing runway",
+                "airport approach lights night", "airplane flight evening sky",
+                "aircraft cabin darkness", "airplane runway lights night",
+                "commercial jet flight sunset", "Easyjet a319 overwing exit path",
+                "airplane window wing night", "aircraft landing lights tarmac"
+            ]
+        elif is_cappadocia_topic:
+            token_pool = [
+                "Derinkuyu underground city Cappadocia", "Kaymakli underground city stone",
+                "Cappadocia fairy chimneys landscape", "underground city stone tunnel",
+                "DerinkuyuUndergroundCity02", "Derinkuyu underground rooms",
+                "Goreme valley Cappadocia rocks", "ancient underground carved chambers"
+            ]
+        elif is_luxury:
+            token_pool = [
+                "tropical resort pool luxury", "bali villa sunset pool",
+                "vietnam beach resort ocean", "sri lanka ocean palms beach",
+                "luxury hotel pool tropical", "tropical resort ocean view",
+                "bali private villa jungle", "phuket resort pool sea",
+                "tropical beach sunset walkway", "luxury island villa decking"
+            ]
+        else:
+            for sc in scenes:
+                raw_words = re.findall(r"[a-zA-Z]{4,}", f"{sc.get('narration', '')} {sc.get('image_prompt', '')}")
+                for rw in raw_words:
+                    if rw.lower() not in UNWANTED_PHOTO_KEYWORDS and len(rw) > 3:
+                        token_pool.append(f"{rw} photo")
+
+        for t_query in token_pool:
+            if len(all_downloaded_photos) >= target_count:
+                break
+            for src, cand_list in [
+                ("pixabay_photo", search_pixabay_photos(t_query, exclude_ids=used.union(downloaded_urls), limit=3)),
+                ("wikimedia", search_wikimedia_commons_photos(t_query, exclude_urls=used.union(downloaded_urls), limit=3))
+            ]:
+                if len(all_downloaded_photos) >= target_count:
+                    break
+                for cand in cand_list:
+                    if len(all_downloaded_photos) >= target_count:
+                        break
+                    c_url = cand.get("url")
+                    if not c_url or c_url in downloaded_urls or c_url in used:
+                        continue
+
+                    # Koltuk ve Göz filtresi (Faz-2 aşamasında da sınırlandır)
+                    p2_cand_text = f"{cand.get('title', '')} {cand.get('tags', '')} {t_query}".lower()
+                    p2_is_seat = is_aviation_topic and is_seat_asset(p2_cand_text)
+                    if p2_is_seat and seat_photo_count >= MAX_SEAT_PHOTOS:
+                        used.add(c_url)
+                        continue
+                    p2_is_eye = is_aviation_topic and is_eye_asset(p2_cand_text)
+                    if p2_is_eye and eye_photo_count >= MAX_EYE_PHOTOS:
+                        used.add(c_url)
+                        continue
+
+                    used.add(c_url)
+                    photo_p = pool_dir / f"extra_quota_phase2_{len(all_downloaded_photos):02d}.jpg"
+                    ok = download_and_format_image(c_url, str(photo_p), target_w, target_h)
+                    if not ok or not photo_p.is_file() or photo_p.stat().st_size <= 10000:
+                        continue
+                    try:
+                        cand_im = Image.open(photo_p).convert("RGB")
+                        if is_monochrome_image(cand_im):
+                            photo_p.unlink()
+                            continue
+                        cand_hash = calculate_dhash(cand_im)
+                        if any(hamming_distance(cand_hash, prev_h) < 14 for prev_h in accepted_video_hashes):
+                            photo_p.unlink()
+                            continue
+
+                        # ── Semantik Görsel Doğrulama (CLIP Model Kontrolü) ──
+                        if visual_guard and visual_guard.semantic_model_available:
+                            p2_pos = ["authentic photography", t_query]
+                            p2_neg = [
+                                "oak tree in sunny grass field park",
+                                "war memorial bronze plaque roll of honour names",
+                                "building emergency fire escape concrete stairs",
+                                "museum military warplane propeller exhibit",
+                                "bright blue sky sunny day outdoor",
+                                "iceland volcanic crater lake cold mountains",
+                                "nordic glacier snowy mountain cold lake",
+                                "las vegas casino hotel neon signs mandalay bay",
+                                "eiffel tower paris france",
+                                "modern skyscraper cars traffic highway",
+                                "office desk computer keyboard",
+                                "apartment entrance wooden door modern blue painted door",
+                                "brick arch red brick cellar gothic church corridor",
+                                "red convertible car model woman influencer dress",
+                                "hot air balloons floating in sky",
+                                "cctv surveillance security camera wall mount",
+                                "human legs feet orange sneakers running shoes",
+                                "1950s antique car vintage propeller cargo plane",
+                                "3d computer graphics render flight simulator",
+                                "suburban indoor pool blue plastic cover radiator",
+                                "residential kitchen refrigerator fridge bar stools",
+                                "wooden pirate sailboat ship ropes deck mast",
+                                "bora bora french polynesia overwater bungalow"
+                            ]
+                            if is_aviation_topic:
+                                p2_pos = ["commercial airplane cabin night", "airplane night landing runway"]
+                            elif is_cappadocia_topic:
+                                p2_pos = ["cappadocia fairy chimneys landscape", "derinkuyu underground city carved stone"]
+                            elif is_luxury:
+                                p2_pos = ["tropical resort pool luxury", "tropical beach ocean resort"]
+
+                            clip_res = visual_guard.score_image_against_prompts(cand_im, p2_pos, p2_neg)
+                            if not clip_res.get("is_accepted", True):
+                                if photo_p.is_file():
+                                    photo_p.unlink()
+                                continue
+
+                        enh_im = ImageEnhance.Contrast(cand_im).enhance(1.06)
+                        enh_im = ImageEnhance.Color(enh_im).enhance(1.10)
+                        enh_im.save(photo_p, "JPEG", quality=92)
+                        accepted_video_hashes.append(cand_hash)
+                    except Exception:
+                        pass
+
+                    if p2_is_seat:
+                        seat_photo_count += 1
+                    if p2_is_eye:
+                        eye_photo_count += 1
+
+                    all_downloaded_photos.append(photo_p)
+                    downloaded_urls.add(c_url)
+                    print(f"[PHOTO-POOL] 🚀 Faz-2 Kota editoryal görseli bağlandı ({len(all_downloaded_photos)}/{target_count}): {photo_p.name} [{src}: '{t_query}']")
+                    break
 
     # 4. Zaman Çizgisi Senkronizasyonu ile Kesme Listesini Oluştur (%100 Benzersiz)
     final_cut_photos: List[Path] = []
@@ -1412,18 +1880,26 @@ def fetch_photo_pool(
         else:
             # Sahne havuzu bittiyse, genel indirilmiş havuzdan henüz KULLANILMAMIŞ bir fotoğraf seç
             unused_global = [p for p in all_downloaded_photos if p not in used_cut_photo_paths]
-            if unused_global:
+            # Konu fark etmeksizin Sahne 0 (kanca/açılış) fotoğraflarını sonraki sahnelere sızdırma
+            filtered_unused = [p for p in unused_global if not (assigned_sc >= 1 and p.name.startswith("scene_00_"))]
+            if filtered_unused:
+                chosen = filtered_unused[0]
+            elif unused_global:
                 chosen = unused_global[0]
-            elif all_downloaded_photos:
-                # Emniyet: Tüm benzersizler kullanıldıysa en az kullanılan gerçek görseli bağla (ASLA gri boş kutu basma!)
-                from collections import Counter
-                usage_counts = Counter(final_cut_photos)
-                chosen = min(all_downloaded_photos, key=lambda p: usage_counts[p])
             else:
-                # Son Çare Failsafe
-                chosen = pool_dir / f"unique_failsafe_{cut_i:03d}.jpg"
-                if not chosen.is_file():
-                    Image.new("RGB", (target_w, target_h), (24, 24, 27)).save(chosen, "JPEG")
+                chosen = None
+
+            if not chosen:
+                if all_downloaded_photos:
+                    # Emniyet: Tüm benzersizler kullanıldıysa en az kullanılan gerçek görseli bağla
+                    from collections import Counter
+                    usage_counts = Counter(final_cut_photos)
+                    chosen = min(all_downloaded_photos, key=lambda p: usage_counts[p])
+                else:
+                    # Son Çare Failsafe
+                    chosen = pool_dir / f"unique_failsafe_{cut_i:03d}.jpg"
+                    if not chosen.is_file():
+                        Image.new("RGB", (target_w, target_h), (24, 24, 27)).save(chosen, "JPEG")
         
         used_cut_photo_paths.add(chosen)
         final_cut_photos.append(chosen)

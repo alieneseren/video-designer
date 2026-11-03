@@ -3838,13 +3838,13 @@ def run_remote_web_automation_task(
     auto_sync_mac: bool = True
 ):
     executions[exec_id]["status"] = "running"
-    executions[exec_id]["message"] = "Oracle Cloud sunucusuna bağlanılıyor (132.226.187.103)..."
 
     try:
         from src.remote_runner import RemoteRunner
         runner = RemoteRunner()
+        executions[exec_id]["message"] = f"Uzak sunucuya bağlanılıyor ({runner.host})..."
         if not runner.is_reachable():
-            raise RuntimeError("Oracle Cloud sunucusuna (132.226.187.103) SSH üzerinden ulaşılamadı.")
+            raise RuntimeError(f"Uzak sunucuya ({runner.host}) SSH üzerinden ulaşılamadı.")
 
         mgr = ChannelManager()
         ch = mgr.get_channel(channel_id) or {"channel_id": channel_id}
@@ -5033,7 +5033,7 @@ def dispatch_automation_queue(payload: AutomationDispatchPayload):
         from src.remote_runner import RemoteRunner
         runner = RemoteRunner()
         if not runner.is_reachable():
-            raise RuntimeError("Oracle Cloud sunucusuna (132.226.187.103) SSH üzerinden ulaşılamadı.")
+            raise RuntimeError(f"Uzak sunucuya ({runner.host}) SSH üzerinden ulaşılamadı.")
 
         dispatch_result = runner.dispatch_batch_to_cloud_queue(selected_items)
 

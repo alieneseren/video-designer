@@ -34,6 +34,18 @@ OUTPUT_BASE = BASE_DIR / "output"
 CREDENTIALS_DIR = BASE_DIR / "credentials"
 JOBS_DIR = BASE_DIR / "jobs"
 
+# Yerel gizli .env dosyasını ortam değişkenlerine yükle
+_ENV_FILE = BASE_DIR / ".env"
+if _ENV_FILE.exists():
+    try:
+        for _line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip().strip("'\""))
+    except Exception:
+        pass
+
 import edge_tts
 
 _TRANSLATE_CACHE: dict = {}
@@ -2855,10 +2867,17 @@ def run_job(job_file: Path, force_rebuild: bool = False):
         if workspace_dir.exists():
             shutil.rmtree(workspace_dir, ignore_errors=True)
         if work_dir.exists():
+            for sub_d in ["photo_pool", "cuts", "glass_sub_cards", "broll_pool"]:
+                target_sub = work_dir / sub_d
+                if target_sub.exists():
+                    shutil.rmtree(target_sub, ignore_errors=True)
             for f in work_dir.glob("*.mp4"):
                 try: f.unlink()
                 except Exception: pass
             for f in work_dir.glob("raw_*"):
+                try: f.unlink()
+                except Exception: pass
+            for f in work_dir.glob("*_concat.txt"):
                 try: f.unlink()
                 except Exception: pass
 

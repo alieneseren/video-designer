@@ -1,8 +1,10 @@
 """
 remote_runner.py
-Oracle Cloud (132.226.187.103) Uzak Üretim Köprüsü.
+Uzak Sunucu (Remote Worker) Üretim Köprüsü.
 Lokal yt-oto-video backend'inden sunucuya senaryoları ve görevleri iletir,
 üretim sürecini düşük öncelikle (nice 19) koşturur ve durumu izler.
+Tüm sunucu IP, SSH anahtarı ve bağlantı ayarları ortam değişkenlerinden veya
+şifrelenmiş SettingsManager yapılandırmasından dinamik olarak çözümlenir.
 """
 
 from __future__ import annotations
@@ -18,31 +20,89 @@ import uuid
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-SSH_HOST = "132.226.187.103"
-SSH_USER = "ubuntu"
-SSH_KEY_PATH = "/Users/alienes/new_affilate/ssh-key-2026-09-02 (1).key"
-REMOTE_BASE_DIR = "/home/ubuntu/yt-remote-worker"
+
+def _resolve_default_ssh_config() -> tuple[str, str, str, str, str]:
+    """
+    Uzak sunucu bağlantı parametrelerini güvenli sırayla dinamik çözer:
+    1. Ortam değişkenleri (REMOTE_WORKER_HOST, REMOTE_WORKER_USER, REMOTE_WORKER_KEY_PATH, SSH_STRICT_HOST_KEY_CHECKING)
+    2. SettingsManager (.env / config/settings.json - şifrelenmiş)
+    3. Yerel makinedeki standart SSH anahtar adayları (~/.ssh/id_ed25519, ~/.ssh/id_rsa)
+    """
+    host = os.environ.get("REMOTE_WORKER_HOST", "").strip()
+    user = os.environ.get("REMOTE_WORKER_USER", "").strip()
+    key_path = os.environ.get("REMOTE_WORKER_KEY_PATH", "").strip()
+    remote_dir = os.environ.get("REMOTE_WORKER_DIR", "").strip()
+    strict_checking = os.environ.get("SSH_STRICT_HOST_KEY_CHECKING", "").strip()
+
+    try:
+        try:
+            from settings_manager import SettingsManager
+        except ImportError:
+            from src.settings_manager import SettingsManager
+        sm = SettingsManager()
+        if not host:
+            host = sm.get("remote_worker_host", "").strip()
+        if not user:
+            user = sm.get("remote_worker_user", "").strip()
+        if not key_path:
+            key_path = sm.get("remote_worker_key_path", "").strip()
+        if not strict_checking:
+            strict_checking = sm.get("ssh_strict_host_key_checking", "").strip()
+    except Exception:
+        pass
+
+    if not user:
+        user = "ubuntu"
+    if not remote_dir:
+        remote_dir = "/home/ubuntu/yt-remote-worker"
+    if not strict_checking:
+        strict_checking = "accept-new"
+
+    # Eğer key_path hala boşsa standart SSH anahtar adaylarını kontrol et
+    if not key_path:
+        candidates = [
+            Path.home() / ".ssh" / "id_ed25519",
+            Path.home() / ".ssh" / "id_rsa",
+        ]
+        for c in candidates:
+            if c.exists():
+                key_path = str(c)
+                break
+
+    return host, user, key_path, remote_dir, strict_checking
+
+
+DEFAULT_HOST, DEFAULT_USER, DEFAULT_KEY_PATH, DEFAULT_REMOTE_DIR, DEFAULT_STRICT_CHECK = _resolve_default_ssh_config()
+SSH_HOST = DEFAULT_HOST
+SSH_USER = DEFAULT_USER
+SSH_KEY_PATH = DEFAULT_KEY_PATH
+REMOTE_BASE_DIR = DEFAULT_REMOTE_DIR
+SSH_STRICT_CHECK = DEFAULT_STRICT_CHECK
 
 
 class RemoteRunner:
     def __init__(
         self,
-        host: str = SSH_HOST,
-        user: str = SSH_USER,
-        key_path: str = SSH_KEY_PATH,
-        remote_dir: str = REMOTE_BASE_DIR
+        host: Optional[str] = None,
+        user: Optional[str] = None,
+        key_path: Optional[str] = None,
+        remote_dir: Optional[str] = None,
+        strict_host_key_checking: Optional[str] = None
     ):
-        self.host = host
-        self.user = user
-        self.key_path = str(Path(key_path).expanduser().resolve())
-        self.remote_dir = remote_dir
+        def_host, def_user, def_key, def_dir, def_strict = _resolve_default_ssh_config()
+        self.host = host or def_host
+        self.user = user or def_user
+        resolved_key = key_path or def_key
+        self.key_path = str(Path(resolved_key).expanduser().resolve()) if resolved_key else ""
+        self.remote_dir = remote_dir or def_dir
+        self.strict_host_key_checking = strict_host_key_checking or def_strict
 
     def _run_ssh_cmd(self, cmd_str: str, timeout: int = 25) -> tuple[int, str, str]:
         """SSH üzerinden uzakta tekil komut çalıştırır."""
         ssh_cmd = [
             "ssh",
             "-i", self.key_path,
-            "-o", "StrictHostKeyChecking=no",
+            "-o", f"StrictHostKeyChecking={self.strict_host_key_checking}",
             "-o", "ConnectTimeout=10",
             "-o", "ServerAliveInterval=15",
             "-o", "ServerAliveCountMax=3",
@@ -78,7 +138,7 @@ class RemoteRunner:
         scp_cmd = [
             "scp",
             "-i", self.key_path,
-            "-o", "StrictHostKeyChecking=no",
+            "-o", f"StrictHostKeyChecking={self.strict_host_key_checking}",
             *[str(f) for f in files],
             f"{self.user}@{self.host}:{self.remote_dir}/credentials/"
         ]
@@ -180,7 +240,7 @@ class RemoteRunner:
         scp_cmd = [
             "scp",
             "-i", self.key_path,
-            "-o", "StrictHostKeyChecking=no",
+            "-o", f"StrictHostKeyChecking={self.strict_host_key_checking}",
             tmp_path,
             f"{self.user}@{self.host}:{remote_job_file}"
         ]
@@ -661,7 +721,7 @@ class RemoteRunner:
                 scp_cmd = [
                     "scp",
                     "-i", self.key_path,
-                    "-o", "StrictHostKeyChecking=no",
+                    "-o", f"StrictHostKeyChecking={self.strict_host_key_checking}",
                     "-o", "ConnectTimeout=10",
                     "-o", "ServerAliveInterval=15",
                     "-o", "ServerAliveCountMax=3",
@@ -797,7 +857,7 @@ print(json.dumps({{"verified": list(expected)}}))
             "-avz",
             "--partial",
             "--inplace",
-            "-e", f"ssh -i '{self.key_path}' -o StrictHostKeyChecking=no",
+            "-e", f"ssh -i '{self.key_path}' -o StrictHostKeyChecking={self.strict_host_key_checking}",
             f"{self.user}@{self.host}:{remote_video}",
             str(dest_p)
         ]
@@ -812,7 +872,7 @@ print(json.dumps({{"verified": list(expected)}}))
         scp_cmd = [
             "scp",
             "-i", self.key_path,
-            "-o", "StrictHostKeyChecking=no",
+            "-o", f"StrictHostKeyChecking={self.strict_host_key_checking}",
             f"{self.user}@{self.host}:{remote_video}",
             str(dest_p)
         ]
@@ -1177,7 +1237,7 @@ print('DELETED')
                 scp_meta = [
                     "scp",
                     "-i", self.key_path,
-                    "-o", "StrictHostKeyChecking=no",
+                    "-o", f"StrictHostKeyChecking={self.strict_host_key_checking}",
                     f"{self.user}@{self.host}:{remote_meta}",
                     str(dest_meta)
                 ]

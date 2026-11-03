@@ -62,8 +62,8 @@ except ImportError:
         render_atc_tower_reconstruction = None
         render_investigation_reconstruction = None
 
-# Varsayılan Pixabay API Anahtarı
-DEFAULT_PIXABAY_KEY = "57648418-49ecb0060f2db281a386d04cf"
+# Varsayılan Pixabay API Anahtarı (Ortam değişkeninden veya settings.json'dan okunur)
+DEFAULT_PIXABAY_KEY = ""
 
 
 def get_pixabay_key() -> str:
@@ -76,7 +76,7 @@ def get_pixabay_key() -> str:
             return str(val).strip()
     except Exception:
         pass
-    return os.environ.get("PIXABAY_API_KEY", DEFAULT_PIXABAY_KEY)
+    return os.environ.get("PIXABAY_API_KEY", "").strip()
 
 
 def _http_get_json(url: str, timeout: int = 12) -> Optional[Dict[str, Any]]:
