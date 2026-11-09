@@ -67,429 +67,10 @@ except ImportError:
             fallback_engine = None
             asset_fetcher = None
 
-def get_pixabay_key() -> str:
-    """Aktif Pixabay API anahtarını ortam değişkeni veya SettingsManager'dan alır."""
-    api_key = os.environ.get("PIXABAY_API_KEY", "").strip()
-    if not api_key:
-        try:
-            from settings_manager import SettingsManager
-            sm = SettingsManager()
-            val = sm.get("pixabay_api_key")
-            if val and str(val).strip():
-                api_key = str(val).strip()
-        except Exception:
-            pass
-    return api_key
-
+PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "57648418-49ecb0060f2db281a386d04cf")
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
-WIKIMEDIA_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+WIKIMEDIA_USER_AGENT = "ShortStudioVideoWorker/2.0 (mailto:alienees@gmail.com)"
 BROWSER_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-
-# ── HEDEFE KİLİTLİ ZAMAN ÇİZELGESİ SLOTLARI (Timeline Visual Slot Registry) ──
-# Her projenin saniye bazlı semantik hikaye akışına %100 uyan görsel eşleştirmeleri
-TIMELINE_SLOT_REGISTRY: Dict[str, List[Dict[str, Any]]] = {
-    "fisher": [
-        {
-            "time_range": (0.0, 2.2),
-            "query": "human eye pupil reflex slow motion macro medical scientific 4k",
-            "fallback_queries": ["pupil eye", "eye pupil macro", "human pupil reflex"],
-            "negatives": ["clippers", "suns", "basketball_game", "crowd", "arena"],
-            "description": "00:00 - 00:01 Neuro-visual pupil reflex hook"
-        },
-        {
-            "time_range": (2.2, 4.2),
-            "query": "human optic nerve signal transmission 3d medical animation 4k",
-            "fallback_queries": ["human optic nerve", "optic nerve signal", "eye neural transmission"],
-            "negatives": ["clippers", "suns", "crowd", "arena"],
-            "description": "00:02 - 00:04 Optic nerve transmission"
-        },
-        {
-            "time_range": (4.0, 6.2),
-            "query": "human brain neural transmission impulse visual cortex 3d medical animation 4k",
-            "fallback_queries": ["human motor cortex", "visual cortex brain", "cortex neurons"],
-            "negatives": ["blurry", "240p", "free_throw", "pixelated", "court"],
-            "description": "00:04 - 00:06 Visual cortex transmission"
-        },
-        {
-            "time_range": (6.0, 8.2),
-            "query": "neural impulse transmission motor cortex medical visualization 4k",
-            "fallback_queries": ["motor cortex neurons", "neural impulse transmission", "brain impulse cortex"],
-            "negatives": ["clippers", "suns", "basketball_game", "crowd", "arena"],
-            "description": "00:06 - 00:07 Motor cortex visualization"
-        },
-        {
-            "time_range": (8.0, 10.2),
-            "query": "vintage NBA 24s shot clock digital tenths ticking down 4k",
-            "fallback_queries": ["shot clock basketball", "basketball shot clock tenths", "shot clock game clock"],
-            "negatives": ["crowd", "fans", "yellow_scribble", "marker", "circle", "repeat"],
-            "description": "00:08 - 00:09 Vintage shot clock tenths"
-        },
-        {
-            "time_range": (14.5, 17.5),
-            "query": "1990 Trent Tucker Knicks rule broadcast vintage shot clock buzzer 4k",
-            "fallback_queries": ["Trent Tucker basketball", "shot clock basketball buzzer", "vintage shot clock NBA"],
-            "negatives": ["2009", "magic", "dwight_howard", "orlando", "finals"],
-            "description": "00:15 - 00:17 1990 Trent Tucker rule"
-        },
-        {
-            "time_range": (17.5, 20.0),
-            "query": "1990 Trent Tucker Knicks rule vintage shot clock 4k",
-            "fallback_queries": ["shot clock tenths NBA", "basketball shot clock 24", "Trent Tucker Knicks"],
-            "negatives": ["2009", "magic", "orlando", "finals", "dwight_howard"],
-            "description": "00:18 - 00:19 Trent Tucker vintage shot clock"
-        },
-        {
-            "time_range": (20.0, 22.5),
-            "query": "SBC Center official 0.4s clock tenths countdown scoreboard",
-            "fallback_queries": ["shot clock scoreboard basketball", "basketball game clock digital", "SBC Center 2004"],
-            "negatives": ["crowd", "fans", "yellow_scribble", "marker", "circle", "repeat"],
-            "description": "00:20 - 00:21 Official 0.4s clock"
-        },
-        {
-            "time_range": (25.5, 28.0),
-            "query": "Derek Fisher inbounds pass catch turn mid air broadcast angle 2004",
-            "fallback_queries": ["Derek Fisher catch turn", "Derek Fisher 2004 Lakers", "Derek Fisher inbound Lakers"],
-            "negatives": ["144p", "240p", "blurry", "ceiling", "pixelated"],
-            "description": "00:26 - 00:27 Fisher inbounds pass catch turn"
-        },
-        {
-            "time_range": (33.5, 36.0),
-            "query": "Derek Fisher left hand release flicking buzzer beater 0.4 seconds Lakers 2004",
-            "fallback_queries": ["Derek Fisher left hand buzzer beater", "Derek Fisher 0.4 shot Lakers", "Derek Fisher buzzer beater"],
-            "negatives": ["duncan", "malone", "post_up", "rebound", "spurs_offense"],
-            "description": "00:34 - 00:35 Fisher left hand release"
-        },
-        {
-            "time_range": (36.0, 40.0),
-            "query": "NBA backboard red light illuminated ball entering rim buzzer beater 2004",
-            "fallback_queries": ["basketball backboard red light rim", "NBA backboard buzzer beater red light", "backboard red light rim buzzer"],
-            "negatives": ["duncan", "trophy", "celebration", "spurs_win", "champion"],
-            "description": "00:36 - 00:39 Red light illuminated ball in rim"
-        },
-        {
-            "time_range": (40.0, 44.0),
-            "query": "Derek Fisher sprinting into locker room tunnel teammates chasing ecstatic 2004",
-            "fallback_queries": ["Derek Fisher running tunnel 2004", "Derek Fisher locker room celebration Lakers 2004", "Derek Fisher sprint 2004"],
-            "negatives": ["duncan", "trophy", "celebration", "spurs_win", "champion"],
-            "description": "00:40 - 00:43 Fisher sprinting into locker room tunnel"
-        },
-        {
-            "time_range": (44.0, 46.0),
-            "query": "Derek Fisher celebration teammates mobbing 2004",
-            "fallback_queries": ["Derek Fisher celebration Lakers", "Derek Fisher teammates Lakers 2004"],
-            "negatives": ["billups", "stephenson", "pistons", "pacers", "unrelated", "trophy", "duncan", "spurs_trophy"],
-            "description": "00:44 - 00:45 Derek Fisher celebration teammates mobbing"
-        },
-        {
-            "time_range": (46.0, 48.0),
-            "query": "Kobe Bryant and Shaquille O'Neal mobbing Derek Fisher celebration court 2004",
-            "fallback_queries": ["Kobe Bryant Shaquille O'Neal Derek Fisher Lakers 2004", "Kobe Fisher celebration Lakers", "Lakers celebration 2004"],
-            "negatives": ["billups", "stephenson", "pistons", "pacers", "unrelated", "green"],
-            "description": "00:46 - 00:47 Kobe and Shaq mobbing Fisher"
-        },
-        {
-            "time_range": (48.0, 50.0),
-            "query": "modern NBA replay review control center screens 4k slow motion",
-            "fallback_queries": ["NBA replay review control center", "NBA video review room screens", "NBA replay center Secaucus"],
-            "negatives": ["crowd", "fans", "yellow_scribble", "marker", "circle", "repeat"],
-            "description": "00:48 - 00:49 NBA replay review control center screens"
-        },
-        {
-            "time_range": (50.0, 52.5),
-            "query": "Derek Fisher smiling press conference Lakers jersey 2004",
-            "fallback_queries": ["Derek Fisher press conference Lakers 2004", "Derek Fisher smiling Lakers", "Derek Fisher portrait Lakers 2004"],
-            "negatives": ["2010", "celtics", "green", "finals", "old_fisher"],
-            "description": "00:50 - 00:51 Fisher smiling press conference Lakers 2004"
-        }
-    ],
-    "harden": [
-        {
-            "time_range": (0.0, 3.5),
-            "query": "athlete running with kinematic sensors motion capture lab sports science 4k",
-            "fallback_queries": ["athlete motion capture sensors", "kinematic sensors sports science", "motion capture lab sports"],
-            "negatives": ["crowd", "game", "stadium", "arena", "talking", "dunk", "rim_hang"],
-            "description": "00:00 - 00:03 Kinematic sensors motion capture lab"
-        },
-        {
-            "time_range": (3.5, 7.0),
-            "query": "biomechanics computer motion capture data velocity curve 4k",
-            "fallback_queries": ["biomechanics computer velocity data", "sports science motion curve", "biomechanics graph 3d"],
-            "negatives": ["crowd", "game", "stadium"],
-            "description": "00:04 - 00:07 Biomechanics computer velocity data"
-        },
-        {
-            "time_range": (11.5, 14.5),
-            "query": "basketball shoes planting hard hardwood court friction squeak slow motion close up",
-            "fallback_queries": ["basketball shoes hardwood court friction", "basketball sneakers court squeak close up", "basketball shoes planting hard"],
-            "negatives": ["layup", "floating", "dunk", "airborne", "static_hold"],
-            "description": "00:12 - 00:14 Basketball shoes hardwood court friction squeak"
-        },
-        {
-            "time_range": (17.0, 20.0),
-            "query": "James Harden smiling focused portrait Houston Rockets jersey 4k clean crop",
-            "fallback_queries": ["James Harden Houston Rockets portrait", "James Harden Rockets smiling", "James Harden Houston Rockets 2018"],
-            "negatives": ["armpit", "extreme_crop", "skin_fold", "bad_framing", "blurry", "scoreboard", "ticker"],
-            "description": "00:18 - 00:19 Harden smiling focused portrait Houston Rockets"
-        },
-        {
-            "time_range": (21.5, 24.5),
-            "query": "James Harden driving to the rim low angle broadcast 4k sharp",
-            "fallback_queries": ["James Harden drive rim Rockets", "James Harden driving layup Rockets 2018", "James Harden low angle drive"],
-            "negatives": ["144p", "240p", "pixelated", "blurry", "zoom_artifact"],
-            "description": "00:22 - 00:23 Harden driving to the rim sharp"
-        },
-        {
-            "time_range": (26.0, 29.5),
-            "query": "basketball player planting lead leg eccentric quad load muscle flexion close up 4k",
-            "fallback_queries": ["lead leg eccentric quad load", "quadriceps braking mechanics", "quad muscle flexion basketball"],
-            "negatives": ["144p", "240p", "face_zoom", "cleveland", "distortion"],
-            "description": "00:27 - 00:29 Lead leg eccentric quad load braking mechanics"
-        },
-        {
-            "time_range": (29.5, 32.5),
-            "query": "James Harden rapid deceleration defender off balance slow motion 4k",
-            "fallback_queries": ["James Harden step back deceleration Rockets", "James Harden separation Rockets 2018", "James Harden sudden stop defender"],
-            "negatives": ["scoreboard", "ticker", "108", "111", "broadcast_text", "overlay", "floater", "layup", "cavs_logo"],
-            "description": "00:31 - 00:32 Harden rapid deceleration defender off balance"
-        },
-        {
-            "time_range": (32.5, 35.5),
-            "query": "James Harden deadly crossover hesitation defender stumbling slow motion 4k",
-            "fallback_queries": ["James Harden crossover defender Rockets", "James Harden crossover hesitation 2018", "James Harden dribble crossover"],
-            "negatives": ["blurry", "pixelated", "crop", "low_res", "dunk", "layup", "warriors_rim"],
-            "description": "00:33 - 00:34 Harden deadly crossover hesitation"
-        },
-        {
-            "time_range": (35.5, 38.0),
-            "query": "NBA defender sliding past falling out of bounds helpless hardwood court",
-            "fallback_queries": ["defender sliding falling basketball court", "defender falling down hardwood court", "NBA defender falling on floor"],
-            "negatives": ["blurry", "pixelated", "crop", "low_res"],
-            "description": "00:35 - 00:36 Defender sliding past falling out of bounds"
-        },
-        {
-            "time_range": (43.5, 46.5),
-            "query": "basketball net swish slow motion arena lights 4k James Harden step back three",
-            "fallback_queries": ["James Harden step back three pointer net swish", "basketball net swish slow motion arena lights 4k"],
-            "negatives": ["76ers", "standing", "free_throw", "defender_back", "idle", "144p", "blurry_face"],
-            "description": "00:44 - 00:46 Basketball net swish step back three"
-        },
-        {
-            "time_range": (46.5, 49.0),
-            "query": "James Harden smiling confident portrait Houston Rockets iconic beard 4k",
-            "fallback_queries": ["James Harden Houston Rockets smiling 4k", "James Harden portrait Houston Rockets iconic beard 4k"],
-            "negatives": ["goggles_pose", "duplicate", "scoreboard", "ticker"],
-            "description": "00:47 - 00:49 Harden smiling confident portrait Houston Rockets"
-        }
-    ]
-}
-
-
-USED_CURATED_SLOT_MATCHES = set()
-
-
-def plan_semantic_beats(sentence_boundaries: List[Dict[str, Any]], total_dur: float) -> List[Dict[str, Any]]:
-    """
-    Cümle sınırlarını baz alarak dinamik, ritmik (1.8s - 3.0s) montaj vuruşları (beats) planlar.
-    Her cümlenin sınırına kilitlenir, cümle ortasında rastgele değil, tam bölünmelerle çalışır.
-    Toplam süre milisaniyesine kadar korunur, son kare tam total_dur anında biter.
-    """
-    beats = []
-    if not sentence_boundaries:
-        # Fallback: uniform 2.2s cuts
-        num_cuts = max(1, int(round(total_dur / 2.2)))
-        cut_len = total_dur / num_cuts
-        for i in range(num_cuts):
-            s = i * cut_len
-            e = total_dur if i == num_cuts - 1 else (i + 1) * cut_len
-            beats.append({"start": round(s, 3), "end": round(e, 3), "duration": round(e - s, 3), "sentence_text": ""})
-        return beats
-
-    # Sınırları normalize et ve 0.0'dan total_dur'a kadar boşluksuz bağla
-    normalized_sents = []
-    for idx, sb in enumerate(sentence_boundaries):
-        s_start = 0.0 if idx == 0 else float(sb.get("offset", 0.0))
-        s_dur = float(sb.get("duration", 0.0))
-        s_end = s_start + s_dur
-        if idx < len(sentence_boundaries) - 1:
-            next_start = float(sentence_boundaries[idx + 1].get("offset", s_end))
-            if next_start > s_end:
-                s_end = next_start
-        else:
-            s_end = max(s_end, total_dur)
-        normalized_sents.append({
-            "start": s_start,
-            "end": s_end,
-            "duration": s_end - s_start,
-            "text": sb.get("text", "")
-        })
-
-    if normalized_sents:
-        normalized_sents[-1]["end"] = max(normalized_sents[-1]["end"], total_dur)
-        normalized_sents[-1]["duration"] = normalized_sents[-1]["end"] - normalized_sents[-1]["start"]
-
-    for sent_idx, sent in enumerate(normalized_sents):
-        s_start = sent["start"]
-        s_end = sent["end"]
-        s_dur = sent["duration"]
-        text = sent["text"]
-
-        if s_dur <= 0.1:
-            continue
-
-        # Ritmik alt kesmeler (Strict max_scene_duration: 2.20s sınırı)
-        # s_dur > 2.20 olan her cümle matematiksel olarak <= 2.15s parçalara bölünür
-        num_subcuts = max(1, int(math.ceil(s_dur / 2.15)))
-
-        sub_len = s_dur / num_subcuts
-        for sc in range(num_subcuts):
-            b_start = s_start + sc * sub_len
-            b_end = s_end if sc == num_subcuts - 1 else s_start + (sc + 1) * sub_len
-            beats.append({
-                "beat_idx": len(beats),
-                "sentence_idx": sent_idx,
-                "start": round(b_start, 3),
-                "end": round(b_end, 3),
-                "duration": round(b_end - b_start, 3),
-                "sentence_text": text
-            })
-
-    # Son vuruşun bitişini tam olarak total_dur süresine kitle
-    if beats:
-        beats[-1]["end"] = round(total_dur, 3)
-        beats[-1]["duration"] = round(beats[-1]["end"] - beats[-1]["start"], 3)
-
-    # KESİN GÜVENCE: 2.20 saniyeyi aşan hiçbir beat kalamaz (Örn: 6.0s outro -> 3 x 2.0s vuruş)
-    sanitized_beats = []
-    for b in beats:
-        b_dur = b["duration"]
-        if b_dur > 2.20:
-            n_sub = int(math.ceil(b_dur / 2.05))
-            piece_len = b_dur / n_sub
-            for pi in range(n_sub):
-                p_start = b["start"] + pi * piece_len
-                p_end = b["end"] if pi == n_sub - 1 else b["start"] + (pi + 1) * piece_len
-                sanitized_beats.append({
-                    "beat_idx": len(sanitized_beats),
-                    "sentence_idx": b.get("sentence_idx", 0),
-                    "start": round(p_start, 3),
-                    "end": round(p_end, 3),
-                    "duration": round(p_end - p_start, 3),
-                    "sentence_text": b.get("sentence_text", "")
-                })
-        else:
-            b["beat_idx"] = len(sanitized_beats)
-            sanitized_beats.append(b)
-
-    return sanitized_beats
-
-
-def fetch_slot_image(
-    slot: dict,
-    target_path: Path,
-    downloads_dir: Path,
-    W: int,
-    H: int
-) -> bool:
-    """Belirli bir zaman çizelgesi slotu için hedefe kilitli görseli bulur, indirir ve dikey formatlar."""
-    if target_path.exists() and target_path.stat().st_size > 15000:
-        return True
-
-    # 1. Küratörlü Varlık Havuzu Önceliği (Sıfır Web Sapması Garantisi)
-    curated_sports_dir = Path(__file__).resolve().parent.parent / "assets" / "curated_sports"
-    if not curated_sports_dir.exists():
-        curated_sports_dir = Path("/home/ubuntu/yt-remote-worker/assets/curated_sports")
-
-    q_lower = (slot.get("query", "") + " " + " ".join(slot.get("fallback_queries", []))).lower()
-
-    curated_match = None
-    if any(k in q_lower for k in ["pupil", "eye pupil", "reflex"]):
-        curated_match = curated_sports_dir / "b_roll" / "sports_science" / "eye_pupil_reflex.jpg"
-    elif any(k in q_lower for k in ["optic nerve", "synapse", "neural impulse"]):
-        curated_match = curated_sports_dir / "b_roll" / "sports_science" / "synapse_impulse.jpg"
-    elif any(k in q_lower for k in ["motor cortex"]):
-        curated_match = curated_sports_dir / "b_roll" / "sports_science" / "motor_cortex.jpg"
-    elif any(k in q_lower for k in ["brain", "cortex", "visual cortex", "neural impulse"]):
-        curated_match = curated_sports_dir / "b_roll" / "sports_science" / "brain_cortex.jpg"
-    elif any(k in q_lower for k in ["kinematic", "sensors", "motion capture", "mocap"]):
-        curated_match = curated_sports_dir / "b_roll" / "sports_science" / "mocap_sensors.jpg"
-    elif any(k in q_lower for k in ["velocity", "curve", "biomechanics data"]):
-        curated_match = curated_sports_dir / "b_roll" / "sports_science" / "biomechanics_curve.jpg"
-    elif any(k in q_lower for k in ["quad", "eccentric", "braking", "load", "muscle flexion"]):
-        curated_match = curated_sports_dir / "b_roll" / "sports_science" / "quad_braking_mechanics.jpg"
-    elif any(k in q_lower for k in ["trent tucker", "tuck rule", "knicks rule"]):
-        curated_match = curated_sports_dir / "b_roll" / "shot_clocks" / "trent_tucker_rule.jpg"
-    elif any(k in q_lower for k in ["shot clock", "tenths", "0.4s clock", "countdown"]):
-        curated_match = curated_sports_dir / "b_roll" / "shot_clocks" / "vintage_shot_clock.jpg"
-    elif any(k in q_lower for k in ["shoes", "squeak", "friction"]):
-        curated_match = curated_sports_dir / "b_roll" / "court_action" / "shoes_hardwood_friction.jpg"
-    elif any(k in q_lower for k in ["sbc center", "arena floor", "spurs center"]):
-        curated_match = curated_sports_dir / "b_roll" / "court_action" / "san_antonio_sbc_center.jpg"
-    elif any(k in q_lower for k in ["sprint", "tunnel", "locker room"]):
-        curated_match = curated_sports_dir / "b_roll" / "court_action" / "fisher_sprint_tunnel.jpg"
-    elif any(k in q_lower for k in ["buzzer beater", "turnaround", "0.4 shot", "release"]):
-        curated_match = curated_sports_dir / "b_roll" / "court_action" / "fisher_buzzer_beater_shot.jpg"
-    elif any(k in q_lower for k in ["inbound", "catch turn", "mid air"]):
-        curated_match = curated_sports_dir / "b_roll" / "court_action" / "fisher_inbound_catch.jpg"
-    elif any(k in q_lower for k in ["step back", "step-back", "separation"]):
-        curated_match = curated_sports_dir / "b_roll" / "court_action" / "harden_stepback_three.jpg"
-    elif any(k in q_lower for k in ["ankle", "crossover", "stumble", "off balance", "stumbling"]):
-        curated_match = curated_sports_dir / "b_roll" / "court_action" / "harden_ankle_breaker.jpg"
-    elif any(k in q_lower for k in ["swish", "rim", "backboard red light", "three pointer"]):
-        curated_match = curated_sports_dir / "b_roll" / "court_action" / "basketball_net_swish.jpg"
-    elif any(k in q_lower for k in ["replay", "control center", "monitor", "referee"]):
-        curated_match = curated_sports_dir / "b_roll" / "court_action" / "referee_monitor_screens.jpg"
-
-    # Doğrudan slot dosya adıyla eşleşme kontrolü (Örn: slot_fisher_00.jpg)
-    slot_file_name = target_path.name
-    for athlete_dir in (curated_sports_dir / "athletes").glob("*"):
-        cand_slot = athlete_dir / slot_file_name
-        if cand_slot.exists() and cand_slot.stat().st_size > 15000:
-            curated_match = cand_slot
-            break
-
-    # Eğer b-roll eşleşmediyse ve slot sorgusu bilinen sporcuyu içeriyorsa, sporcunun onaylı havuzundan seç
-    if not curated_match:
-        for athlete_dir in (curated_sports_dir / "athletes").glob("*"):
-            ath_name = athlete_dir.name.replace("_", " ").lower()
-            if ath_name in q_lower or any(p in q_lower for p in ath_name.split() if len(p) > 3):
-                cand_photos = sorted(athlete_dir.glob("photo_*.jpg"))
-                for cp in cand_photos:
-                    if str(cp) not in USED_CURATED_SLOT_MATCHES:
-                        curated_match = cp
-                        break
-                if curated_match:
-                    break
-
-    # Daha önce başka bir slota atanmışsa mükerrer olmaması için sıfırla
-    if curated_match and str(curated_match) in USED_CURATED_SLOT_MATCHES:
-        curated_match = None
-
-    if curated_match and curated_match.exists() and curated_match.stat().st_size > 10000:
-        slot_negatives = slot.get("negatives", [])
-        # Doğrulanmış küratörlü b-roll dosyaları (b_roll dizinindekiler) genel slot negatifleriyle elenmez
-        if slot_negatives and "b_roll" not in str(curated_match):
-            try:
-                from visual_qa_guard import visual_qa_guard
-                rep = visual_qa_guard.inspect_frame(curated_match, banned_entities=slot_negatives)
-                if not rep.get("passed"):
-                    issues_str = ", ".join(rep.get("issues", []))
-                    print(f"[SportsEngine] 🚫 [SlotCuratedFilter] {curated_match.name} slot negatives ile reddedildi: {issues_str}")
-                    curated_match = None
-            except Exception:
-                pass
-    if curated_match and curated_match.exists() and curated_match.stat().st_size > 10000:
-        format_sports_image(str(curated_match), str(target_path), W, H)
-        if target_path.exists() and target_path.stat().st_size > 10000:
-            USED_CURATED_SLOT_MATCHES.add(str(curated_match))
-            print(f"[SportsEngine] 🎯 [SlotVisualDirector] Küratörlü slot görseli kilitlendi: {curated_match.name} -> {target_path.name}")
-            return True
-
-    # Sıfır Açık-Web Sapması Kuralı:
-    # Küratörlü havuzda slot bulunamazsa açık web'e ASLA çıkılmaz!
-    # Doğrudan False döner ve montaj motoru onaylı sporcu aksiyon havuzundaki
-    # sıradaki yüksek çözünürlüklü kareye dinamik Ken Burns uygulayarak devam eder.
-    print(f"[SportsEngine] ℹ️ [SlotVisualDirector] '{slot.get('description', '')}' için küratörlü b-roll bulunamadı; onaylı sporcu havuzuna devrediliyor.")
-    return False
 
 # Sözlük düzeltmeleri (Ses/Whisper/AI kaçaklarını engeller)
 SPORTS_NAME_REPLACEMENTS = {
@@ -510,44 +91,18 @@ SPORTS_NAME_REPLACEMENTS = {
 }
 
 NBA_KNOWN_PLAYERS = [
-    "Derek Fisher", "James Harden", "Draymond Green", "Michael Jordan", "LeBron James", "Stephen Curry", "Shaquille O'Neal",
+    "Draymond Green", "Michael Jordan", "LeBron James", "Stephen Curry", "Shaquille O'Neal",
     "Kobe Bryant", "Kareem Abdul-Jabbar", "Wilt Chamberlain", "Dennis Rodman", "Larry Bird",
     "Magic Johnson", "Giannis Antetokounmpo", "Luka Doncic", "Nikola Jokic", "Kevin Durant",
-    "Allen Iverson", "Tim Duncan", "Hakeem Olajuwon", "Dikembe Mutombo", "Russell Westbrook",
-    "Shai Gilgeous-Alexander", "Jalen Brunson"
+    "Allen Iverson", "Tim Duncan", "Hakeem Olajuwon", "Dikembe Mutombo", "Russell Westbrook"
 ]
 
 
-def strip_emojis(text: str) -> str:
-    """TTS motorunun 'backhand index pointing down' gibi emojileri seslendirmesini %100 önler."""
-    if not text:
-        return ""
-    emoji_pattern = re.compile(
-        "["
-        "\U0001F600-\U0001F64F"  # emoticons
-        "\U0001F300-\U0001F5FF"  # symbols & pictographs (içinde 👇 \U0001F447 var)
-        "\U0001F680-\U0001F6FF"  # transport & map
-        "\U0001F1E0-\U0001F1FF"  # flags (iOS)
-        "\U00002702-\U000027B0"
-        "\U000024C2-\U0001F251"
-        "\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
-        "\U0001FA00-\U0001FA6F"  # Chess Symbols
-        "\U0001FA70-\U0001FAFF"  # Symbols and Pictographs Extended-A
-        "\U00002600-\U000026FF"  # Miscellaneous Symbols
-        "]+",
-        flags=re.UNICODE
-    )
-    cleaned = emoji_pattern.sub("", text)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-    return cleaned
-
-
 def sanitize_sports_text(text: str) -> str:
-    """Metindeki imleç, regex, yazım hataları ve tüm emojileri temizler."""
+    """Metindeki imleç, regex veya yazım hatalarını temizler."""
     if not text:
         return ""
-    txt = strip_emojis(text)
-    txt = txt.replace("|", "").replace("`", "").strip()
+    txt = text.replace("|", "").replace("`", "").strip()
     for pattern, repl in SPORTS_NAME_REPLACEMENTS.items():
         txt = re.sub(pattern, repl, txt, flags=re.IGNORECASE)
     return txt
@@ -623,38 +178,24 @@ def search_wikimedia_sports_media(query: str, limit: int = 10) -> List[str]:
     unquoted_rest = re.sub(r'"[^"]+"', '', query).strip()
     rest_words = [w for w in unquoted_rest.split() if w.strip()]
 
-    is_science_or_lab = any(w in query.lower() for w in [
-        "eye", "pupil", "brain", "neuron", "synapse", "neural", "cortex",
-        "biology", "biomechanic", "laboratory", "sensor", "shot clock", "clock", "optic"
-    ])
-
     query_variants = [query]
-    if not is_science_or_lab:
-        if quoted_entities:
-            main_ent = quoted_entities[0]
-            if rest_words:
-                query_variants.append(f'"{main_ent}" {" ".join(rest_words[:2])}')
-            query_variants.append(f'"{main_ent}" basketball')
-            query_variants.append(f'"{main_ent}" NBA')
-            query_variants.append(f'{main_ent} basketball')
-        else:
-            clean_q = re.sub(r'["\']', '', query).strip()
-            words = clean_q.split()
-            if len(words) >= 2:
-                player_base = f"{words[0]} {words[1]}"
-                if len(words) > 3:
-                    query_variants.append(f"{player_base} {' '.join(words[2:4])}")
-                query_variants.append(f"{player_base} basketball")
-                query_variants.append(f"{player_base} NBA")
-            elif clean_q != query:
-                query_variants.append(clean_q)
+    if quoted_entities:
+        main_ent = quoted_entities[0]
+        if rest_words:
+            query_variants.append(f'"{main_ent}" {" ".join(rest_words[:2])}')
+        query_variants.append(f'"{main_ent}" basketball')
+        query_variants.append(f'"{main_ent}" NBA')
+        query_variants.append(f'{main_ent} basketball')
     else:
         clean_q = re.sub(r'["\']', '', query).strip()
         words = clean_q.split()
-        if len(words) > 3:
-            query_variants.append(" ".join(words[:4]))
-            query_variants.append(" ".join(words[:3]))
-        if clean_q != query:
+        if len(words) >= 2:
+            player_base = f"{words[0]} {words[1]}"
+            if len(words) > 3:
+                query_variants.append(f"{player_base} {' '.join(words[2:4])}")
+            query_variants.append(f"{player_base} basketball")
+            query_variants.append(f"{player_base} NBA")
+        elif clean_q != query:
             query_variants.append(clean_q)
 
     urls = []
@@ -667,12 +208,7 @@ def search_wikimedia_sports_media(query: str, limit: int = 10) -> List[str]:
         "rural", "backyard", "driveway", "cargo", "pink_house", "house", "playground",
         "ticket", "stub", "ticket stub", "ticket_stub", "jumbotron", "scoreboard",
         "concession", "bar", "arena bar", "arena seats", "empty arena", "admission",
-        "receipt", "document", "scola", "luis scola", "luther head", "bonzi wells", "yao ming",
-        # Görsel Hijyen Negatifleri: Anime / TikTok / Kart / Mockup Sızıntıları
-        "anime", "manga", "cartoon", "comic", "illustration", "drawing", "animated", "boalls",
-        "tiktok", "emoji", "phone recording", "screen recording", "trading card", "cardboard",
-        "rookie card", "fleer", "nbahoops", "collectible", "mockup", "frame", "poster",
-        "wall art", "ncaa", "kansas", "jayhawks", "240p", "480p", "lowres"
+        "receipt", "document"
     ]
     seen_urls = set()
 
@@ -681,7 +217,12 @@ def search_wikimedia_sports_media(query: str, limit: int = 10) -> List[str]:
             break
         try:
             url = "https://commons.wikimedia.org/w/api.php"
-            search_q = f"{q_try} -ticket -stub -jumbotron -scoreboard -concession -bar -arena -Scola -Head -anime -manga -cartoon -comic -tiktok -trading_card"
+            neg_list = ["-ticket", "-stub", "-jumbotron", "-scoreboard", "-concession", "-bar", "-arena"]
+            q_low = q_try.lower()
+            for p_neg in ["Scola", "Head", "Harden"]:
+                if p_neg.lower() not in q_low:
+                    neg_list.append(f"-{p_neg}")
+            search_q = f"{q_try} {' '.join(neg_list)}"
             params = {
                 "action": "query",
                 "generator": "search",
@@ -721,12 +262,11 @@ def search_wikimedia_sports_media(query: str, limit: int = 10) -> List[str]:
 def search_pixabay_sports_image(query: str, limit: int = 4) -> List[str]:
     """Pixabay üzerinden yüksek çözünürlüklü gerçek basketbol fotoğrafları arar (Çizim ve animasyonlar elenir)."""
     urls = []
-    api_key = get_pixabay_key()
-    if not api_key:
+    if not PIXABAY_API_KEY:
         return urls
     try:
         api_url = (
-            f"https://pixabay.com/api/?key={api_key}"
+            f"https://pixabay.com/api/?key={PIXABAY_API_KEY}"
             f"&q={urllib.parse.quote(query)}"
             f"&image_type=photo&per_page=15&safesearch=true"
         )
@@ -759,8 +299,7 @@ def fetch_pixabay_sports_videos(scratch_dir: Path, target_count: int = 8) -> Lis
     if len(existing) >= target_count:
         return existing
 
-    api_key = get_pixabay_key()
-    if not api_key:
+    if not PIXABAY_API_KEY:
         return existing
 
     queries = [
@@ -775,7 +314,7 @@ def fetch_pixabay_sports_videos(scratch_dir: Path, target_count: int = 8) -> Lis
         if len(candidates) >= target_count * 2:
             break
         params = {
-            "key": api_key,
+            "key": PIXABAY_API_KEY,
             "q": q,
             "video_type": "film",
             "safesearch": "true",
@@ -856,37 +395,41 @@ def extract_sports_video_cut(
 
 
 def format_sports_image(src_path: str, dst_path: str, target_w: int = 1080, target_h: int = 1920):
+    """Görseli 9:16 oranına akıllı crop edip taranmış kenarlıkları yok eder ve sinematik kontrast/keskinlik ekler."""
     try:
         im = Image.open(src_path).convert("RGB")
         src_w, src_h = im.size
-        if src_w == target_w and src_h == target_h:
-            im.save(dst_path, "JPEG", quality=95)
-            return
-
         src_ratio = src_w / src_h
         tgt_ratio = target_w / target_h
+        
+        # Taranmış matbaa kartı çerçeveleri ve letterbox boşluklarını yok etmek için %15 punch-in
+        scale_factor = 1.15
+        scaled_w = int(target_w * scale_factor)
+        scaled_h = int(target_h * scale_factor)
 
         if src_ratio > tgt_ratio:
-            new_h = target_h
+            new_h = scaled_h
             new_w = int(new_h * src_ratio)
         else:
-            new_w = target_w
+            new_w = scaled_w
             new_h = int(new_w / src_ratio)
-
+            
         im = im.resize((new_w, new_h), Image.LANCZOS)
-        left = max(0, (new_w - target_w) // 2)
-        top = max(0, int((new_h - target_h) * 0.20))
+        left = (new_w - target_w) // 2
+        top = (new_h - target_h) // 2
         im = im.crop((left, top, left + target_w, top + target_h))
-
+        
+        # Spor belgeseli kontrastı (+%10) ve renk doygunluğu
         enh_c = ImageEnhance.Contrast(im)
-        im = enh_c.enhance(1.06)
+        im = enh_c.enhance(1.10)
         enh_s = ImageEnhance.Color(im)
-        im = enh_s.enhance(1.06)
-
+        im = enh_s.enhance(1.08)
+        
         im.save(dst_path, "JPEG", quality=95)
     except Exception as e:
         print(f"[SportsEngine] Görsel formatlama hatası ({src_path}): {e}")
         shutil.copy2(src_path, dst_path)
+
 
 def get_bold_font(size: int = 44) -> ImageFont.FreeTypeFont:
     candidate_paths = [
@@ -1181,7 +724,6 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
     
     W, H = 1080, 1920
     fps = 30
-    USED_CURATED_SLOT_MATCHES.clear()
     
     # ── PROJE BAZLI ÇALIŞMA ALANI İZOLASYONU (Job-Level Sandboxing) ──
     if workspace_dir is None:
@@ -1210,115 +752,44 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
     photo_pool_dir.mkdir(parents=True, exist_ok=True)
     cuts_dir.mkdir(parents=True, exist_ok=True)
     scratch_dir.mkdir(parents=True, exist_ok=True)
-
-    # ── OUTRO COMMENT CTA INJECTION (Etkileşim & Yorum Kancası) ──
-    # İzleyici etkileşimini artırmak için videonun kesin dille kapanmasını engelle;
-    # son sahneye kısa, tetikleyici bir tartışma sorusu enjekte et.
-    scenes_raw = script.get("scenes", [])
-    if scenes_raw and isinstance(scenes_raw, list) and len(scenes_raw) > 0:
-        last_scene = scenes_raw[-1]
-        last_narr = last_scene.get("narration") or last_scene.get("text") or ""
-        combined_topic = f"{script.get('title', '')} {job_data.get('title', '')} {last_narr}".lower()
-        if not any(q_mark in last_narr for q_mark in ["?", "below", "debate", "pick"]):
-            if "fisher" in combined_topic or "0.4" in combined_topic:
-                closing_cta = " But in today's NBA, would Fisher's 0.4 miracle still count? Debate below."
-            elif "harden" in combined_topic or "step-back" in combined_topic or "deceleration" in combined_topic:
-                closing_cta = " But is Harden's step-back the most unguardable move in history? Drop your pick below."
-            elif any(w in combined_topic for w in ["record", "wilt", "kobe", "81"]):
-                closing_cta = " Who in today's NBA could ever top this record? Luka or Steph? Drop your pick below."
-            else:
-                closing_cta = " Who in today's league could ever recreate this? Drop your hottest take below."
-
-            last_scene["narration"] = sanitize_sports_text((last_narr.rstrip(".") + closing_cta).strip())
-            if "text" in last_scene:
-                last_scene["text"] = last_scene["narration"]
-            print(f"[SportsEngine] 💬 [Comment-CTA] Kapanış sahnesine etkileşim sorusu eklendi: {closing_cta.strip()}")
-
-    # Tüm sahne metinlerini emoji ve imleçlerden temizle
-    for sc in script.get("scenes", []):
-        if isinstance(sc, dict):
-            if "narration" in sc:
-                sc["narration"] = sanitize_sports_text(sc["narration"])
-            if "text" in sc:
-                sc["text"] = sanitize_sports_text(sc["text"])
-
-    # 1. Seslendirme dosyasını belirle ve gerekirse üret
+    
+    # 1. Seslendirme dosyasını belirle
     audio_file = work_dir / "voiceover.wav"
     if not audio_file.exists():
         audio_file = work_dir / "voiceover.mp3"
-
-    combined_topic = f"{script.get('title', '')} {job_data.get('title', '')}".lower()
-    if "harden" in combined_topic or "step-back" in combined_topic or "deceleration" in combined_topic:
-        tts_rate = "+14%"
-    elif "fisher" in combined_topic or "0.4" in combined_topic:
-        tts_rate = "+2%"
-    else:
-        tts_rate = "+10%"
-
-    sentence_boundaries = []
-    # Eğer force_rebuild aktifse veya ses yoksa veya süre uyumsuzluğu varsa yeniden üret
-    if force_rebuild or not audio_file.exists():
-        if audio_file.exists():
-            try: audio_file.unlink()
-            except Exception: pass
-        print(f"[SportsEngine] Seslendirme üretiliyor (edge-tts, rate={tts_rate})...")
+    
+    if not audio_file.exists():
+        print("[SportsEngine] Seslendirme bulunamadı, edge-tts ile üretiliyor...")
         scenes = script.get("scenes", [])
         if scenes:
-            txt = " ".join(sanitize_sports_text(s.get("narration", "")) for s in scenes)
+            txt = " ".join(s.get("narration", "") for s in scenes)
         else:
-            txt = sanitize_sports_text(script.get("title", "NBA Basketball Analysis"))
-        import edge_tts, asyncio, json
+            txt = script.get("title", "NBA Basketball Analysis")
+        import edge_tts, asyncio
         async def _tts():
-            comm = edge_tts.Communicate(txt, "en-US-ChristopherNeural", rate=tts_rate)
-            with open(work_dir / "voiceover.mp3", "wb") as f_out:
-                async for chunk in comm.stream():
-                    if chunk["type"] == "audio":
-                        f_out.write(chunk["data"])
-                    elif chunk["type"] == "SentenceBoundary":
-                        sentence_boundaries.append({
-                            "text": chunk.get("text", ""),
-                            "offset": float(chunk.get("offset", 0)) / 10_000_000.0,
-                            "duration": float(chunk.get("duration", 0)) / 10_000_000.0
-                        })
+            comm = edge_tts.Communicate(txt, "en-US-ChristopherNeural", rate="+10%")
+            await comm.save(str(work_dir / "voiceover.mp3"))
         asyncio.run(_tts())
         audio_file = work_dir / "voiceover.mp3"
-        if sentence_boundaries:
-            sb_data = json.dumps(sentence_boundaries, indent=2, ensure_ascii=False)
-            (scratch_dir / "sentence_boundaries.json").write_text(sb_data, encoding="utf-8")
-            (work_dir / "sentence_boundaries.json").write_text(sb_data, encoding="utf-8")
-            print(f"[SportsEngine] 🎯 {len(sentence_boundaries)} adet SentenceBoundary kaydedildi.")
-    if not sentence_boundaries:
-        for sbp in [work_dir / "sentence_boundaries.json", scratch_dir / "sentence_boundaries.json"]:
-            if sbp.exists():
-                try:
-                    sentence_boundaries = json.loads(sbp.read_text(encoding="utf-8"))
-                    print(f"[SportsEngine] 🎯 {len(sentence_boundaries)} adet SentenceBoundary diskten yuklendi: {sbp.name}")
-                    break
-                except Exception:
-                    pass
-
-    probe = subprocess.run([
-        "ffprobe", "-v", "error", "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1", str(audio_file)
-    ], capture_output=True, text=True, check=True)
-    audio_dur = float(probe.stdout.strip())
-
-    if "harden" in combined_topic or "step-back" in combined_topic or "deceleration" in combined_topic:
-        # Kullanıcı Talimatı: Harden videosunu tam 00:49.0 süresine bağla (kuyruk sessizliğini sıfırla)
-        total_dur = 49.0
-    elif "fisher" in combined_topic or "0.4" in combined_topic:
-        # Kullanıcı Talimatı: Derek Fisher zaman çizgisini 54.2s seviyesine uzat, son soru asla kesilmesin
-        total_dur = max(54.0, round(audio_dur + 0.6, 2))
-    elif timeline_guard is not None:
+        
+    if timeline_guard is not None:
         try:
             dur_lock = timeline_guard.calculate_locked_timeline_duration(audio_file, tail_padding_sec=1.50)
             total_dur = dur_lock["locked_duration"]
+            print(f"[SportsEngine] 🔒 [TimelineGuard] Dış ses süresi kilitlendi: {dur_lock['audio_duration']:.2f}s + 1.5s = {total_dur:.2f}s")
         except Exception:
-            total_dur = audio_dur + 1.2
+            probe = subprocess.run([
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", str(audio_file)
+            ], capture_output=True, text=True, check=True)
+            total_dur = float(probe.stdout.strip()) + 1.50
     else:
-        total_dur = audio_dur + 1.2
-
-    print(f"[SportsEngine] 🏀 Toplam kilitli video süresi: {total_dur:.2f}s (Dış ses: {audio_dur:.2f}s)")
+        probe = subprocess.run([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(audio_file)
+        ], capture_output=True, text=True, check=True)
+        total_dur = float(probe.stdout.strip()) + 1.50
+    print(f"[SportsEngine] 🏀 Toplam kilitli video süresi (+1.5s tampon nefes payı): {total_dur:.2f}s")
 
     # ── PROJE İZOLASYONU (Job Sandboxing) ──
     # Kara listedeki amatör stokları ve önceki koşudan kalan geçici dosyaları temizle
@@ -1329,12 +800,24 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
             except Exception:
                 pass
 
-    # 2. Video Klip Zorunluluğunun Kaldırılması & Dinamik Ken Burns
-    # enforce_video_clips = False: Amatör/köy evi stok videoları yerine %100 gerçek, onaylanmış NBA arşiv fotoğrafları dinamik Ken Burns ile hareketlendirilir.
-    enforce_video_clips = False
+    # 2. Pozitif Basketbol B-Roll Video Kütüphanesi (1080p Gerçek Salon Aksiyonu)
+    curated_sports_dir = Path(__file__).resolve().parent / "assets" / "curated_sports"
+    if not curated_sports_dir.exists():
+        curated_sports_dir = Path("/home/ubuntu/yt-remote-worker/assets/curated_sports")
+    
+    broll_vids_dir = curated_sports_dir / "b_roll" / "videos"
+    broll_videos = []
+    if broll_vids_dir.exists():
+        broll_videos = sorted([p for p in broll_vids_dir.glob("*.mp4") if p.stat().st_size > 100000])
+    
     custom_vids = job_data.get("custom_videos") or []
-    broll_videos = [Path(cv) for cv in custom_vids if Path(cv).exists()] if enforce_video_clips else []
-    print(f"[SportsEngine] 🎬 Video klip zorunluluğu: {enforce_video_clips} (Amatör Pixabay b-roll devre dışı, %100 onaylı NBA arşiv fotoğrafları)")
+    for cv in custom_vids:
+        cp = Path(cv)
+        if cp.exists() and cp not in broll_videos:
+            broll_videos.append(cp)
+            
+    enforce_video_clips = True
+    print(f"[SportsEngine] 🎬 Pozitif B-Roll Video Havuzu Aktif: {len(broll_videos)} adet onaylı salon basketbol klibi yüklendi.")
 
     # 3. Sahne Görsellerini Hazırla (%100 Gerçek Arşiv Fotoğrafları - SIFIR TEKRAR HAVUZU)
     scenes = script.get("scenes", [])
@@ -1377,20 +860,12 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
     primary_entity = "NBA Player"
     team_name = None
     if query_builder is not None:
-        merged_context = dict(script)
-        if job_data.get("title"):
-            merged_context["job_title"] = job_data.get("title")
-            merged_context["title"] = f"{job_data.get('title')} {script.get('title', '')}".strip()
-        cq_main = query_builder.build_context_locked_queries(merged_context)
+        cq_main = query_builder.build_context_locked_queries(script)
         primary_entity = cq_main.entity
         team_name = cq_main.team_name
 
-    # ── KÜRASYONLU VARLIK HAVUZU ÖNCELİĞİ (Curated Asset Priority) ──
-    # Teyitli sporcular için önceden doğrulanmış yüksek çözünürlüklü onaylı görselleri yükle
-    curated_sports_dir = Path(__file__).resolve().parent.parent / "assets" / "curated_sports"
-    if not curated_sports_dir.exists():
-        curated_sports_dir = Path("/home/ubuntu/yt-remote-worker/assets/curated_sports")
-
+    # ── POZİTİF KÜRASYONLU OYUNCU VE KONU ARŞİVİ ──
+    combined_topic = f"{script.get('title', '')} {job_data.get('title', '')} {primary_entity}".lower()
     athlete_key = None
     if "fisher" in combined_topic or "0.4" in combined_topic:
         athlete_key = "derek_fisher"
@@ -1398,27 +873,53 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
         athlete_key = "james_harden"
 
     if athlete_key:
-        athlete_curated_dir = curated_sports_dir / "athletes" / athlete_key
-        if athlete_curated_dir.exists():
-            curated_imgs = sorted(athlete_curated_dir.glob("photo_*.jpg"))
+        athlete_dir = curated_sports_dir / "athletes" / athlete_key
+        if athlete_dir.exists():
+            curated_imgs = sorted([p for p in athlete_dir.glob("photo_*.jpg") if p.stat().st_size > 10000])
             for ci in curated_imgs:
                 target_p = photo_pool_dir / f"curated_{ci.name}"
-                format_sports_image(str(ci), str(target_p), W, H)
+                if not target_p.exists():
+                    format_sports_image(str(ci), str(target_p), W, H)
                 if target_p.exists() and target_p not in photo_pool:
                     photo_pool.append(target_p)
-            print(f"[SportsEngine] 🏆 Küratörlü havuzdan {len(photo_pool)} adet onaylı {athlete_key} görseli yüklendi.")
+            print(f"[SportsEngine] 🏆 Pozitif sporcu arşivinden {len(photo_pool)} adet onaylı {athlete_key} fotoğrafı yüklendi.")
+
+        # Konuya özel onaylı aksiyon ve spor bilimi kareleri
+        curated_broll_subdirs = [
+            curated_sports_dir / "b_roll" / "court_action",
+            curated_sports_dir / "b_roll" / "sports_science",
+            curated_sports_dir / "b_roll" / "shot_clocks"
+        ]
+        topic_broll_loaded = 0
+        for b_sub in curated_broll_subdirs:
+            if b_sub.exists():
+                for b_img in sorted(b_sub.glob("*.jpg")):
+                    b_name = b_img.stem.lower()
+                    should_add = False
+                    if athlete_key == "derek_fisher" and any(k in b_name for k in ["fisher", "sbc", "clock", "trent", "pupil", "cortex", "synapse", "referee", "arena"]):
+                        should_add = True
+                    elif athlete_key == "james_harden" and any(k in b_name for k in ["harden", "quad", "mocap", "friction", "shoes", "swish", "ankle", "stepback"]):
+                        should_add = True
+
+                    if should_add:
+                        target_b = photo_pool_dir / f"curated_broll_{b_img.name}"
+                        if not target_b.exists():
+                            format_sports_image(str(b_img), str(target_b), W, H)
+                        if target_b.exists() and target_b not in photo_pool:
+                            photo_pool.append(target_b)
+                            topic_broll_loaded += 1
+        if topic_broll_loaded > 0:
+            print(f"[SportsEngine] 🔬 Pozitif spor bilimi & saha içi arşivinden {topic_broll_loaded} adet onaylı görsel yüklendi.")
 
     # ── B & C) ÇOKLU SORGU GENİŞLETMESİ & MİNİMUM 25+ ONAYLI NBA MAÇ GÖRSELİ HAVUZU ──
-    # Aday Havuzu Kıtlığı (Fetch Starvation) ve 3 Görselli Döngü Hatalarını Tamamen Ortadan Kaldırır
+    estimated_cuts = max(8, int(math.ceil(total_dur / 2.20)))
+    target_photo_count = max(25, estimated_cuts + 3)
     if len(photo_pool) >= 12:
-        target_photo_count = len(photo_pool)
-        print(f"[SportsEngine] 💎 Küratörlü sporcu havuzu tam kapasite ({len(photo_pool)} görsel). Web araması atlandı, %100 doğrulanmış arşiv kilitlendi.")
+        print(f"[SportsEngine] 💎 Pozitif havuz tam kapasite ({len(photo_pool)} onaylı görsel). Web araması atlandı, %100 onaylı arşiv kilitlendi.")
     else:
-        estimated_cuts = max(8, int(math.ceil(total_dur / 2.20)))
-        target_photo_count = max(20, estimated_cuts + 3)
         print(f"[SportsEngine] 🔍 Çoklu-sorgu genişletmesi (Multi-Query Expansion) ve SigLIP doğrulama başlatılıyor (Hedef: En az {target_photo_count} görsel)...")
     if len(photo_pool) < target_photo_count and asset_fetcher is not None:
-        detected_year = query_builder.extract_year(str(script), entity=primary_entity) if query_builder is not None else None
+        detected_year = query_builder.extract_year(str(script)) if query_builder is not None else None
         opp_ent = None
         if query_builder is not None:
             c_text = str(script).lower()
@@ -1573,179 +1074,135 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
 
     print(f"[SportsEngine] 📸 Fotoğraf havuzu hazır: Toplam {len(photo_pool)} benzersiz yüksek çözünürlüklü fotoğraf.")
 
-    # 4. Cümle Kilitli Montaj (Sentence-Driven Timeline)
-    print(f"[SportsEngine] 🎬 Cümle kilitli dinamik montaj planlanıyor...")
+    # 4. Hızlı Kesme: Gerçek Oyuncu Fotoğrafları <-> Gerçek Basketbol Video Klipleri (2.0 - 2.5s)
+    # ASLA AYNI GÖRSELE GERİ DÖNÜLMEZ: Her kesme için benzersiz görsel atanır!
+    print(f"[SportsEngine] 🎬 Hızlı jump-cut kurgusu üretiliyor (Sıfır tekrar, benzersiz fotoğraf ve videolar)...")
     cut_files = []
-
-    # Cümle sınırlarını yükle
-    if not sentence_boundaries:
-        for sbp in [workspace_dir / "sentence_boundaries.json", scratch_dir / "sentence_boundaries.json", work_dir / "sentence_boundaries.json"]:
-            if sbp.exists():
-                try:
-                    sentence_boundaries = json.loads(sbp.read_text(encoding="utf-8"))
-                    if sentence_boundaries:
-                        print(f"[SportsEngine] 🎯 {len(sentence_boundaries)} adet SentenceBoundary yüklendi: {sbp.name}")
-                        break
-                except Exception:
-                    pass
-
-    semantic_beats = plan_semantic_beats(sentence_boundaries, total_dur)
-    total_cuts = len(semantic_beats)
-    print(f"[SportsEngine] 🎯 {total_cuts} adet ritmik vuruş (beat) belirlendi (Kilitli süre: {total_dur:.2f}s).")
+    
+    target_cut_duration = 2.20
+    total_cuts = max(8, int(math.ceil(total_dur / target_cut_duration)))
+    actual_cut_len = total_dur / total_cuts
 
     # Kutu skoru (box_score) görselini tespit et
     box_score_img = next((p for p in photo_pool if "box_score" in p.name.lower()), None)
+    # İstatistik anons penceresi (Yaklaşık 16.0s - 22.0s arası)
+    stat_start_idx = max(1, int(15.5 / actual_cut_len))
+    stat_end_idx = min(total_cuts - 1, int(22.0 / actual_cut_len))
 
     # Kutu skoru haricindeki fotoğraflar
     regular_photos = [p for p in photo_pool if p != box_score_img] if box_score_img else list(photo_pool)
     reg_photo_idx = 0
     vid_idx = 0
+    used_photo_set = set()
 
-    # Video klip zorunluluğu kaldırıldı (enforce_video_clips = False):
-    prefer_photos_only = True
+    print(f"[SportsEngine] 🎬 Ritmik Hibrit Jump-Cut Kurgusu başlatılıyor: Toplam {total_cuts} kesme ({actual_cut_len:.2f}s/kesme)...")
 
-    active_slot_key = None
-    if "fisher" in combined_topic or "0.4" in combined_topic:
-        active_slot_key = "fisher"
-    elif "harden" in combined_topic or "step-back" in combined_topic or "deceleration" in combined_topic:
-        active_slot_key = "harden"
-
-    placed_cut_dhashes: List[str] = []
-    used_slot_indices = set()
-    used_timeline_photo_names: Set[str] = set()
-
-    # ── POZİTİF BEYAZ LİSTE VE KÜRESEL KULLANILMIŞ VARLIK HAFIZASI ──
-    try:
-        from core.global_asset_registry import global_asset_registry
-    except ImportError:
-        try:
-            from global_asset_registry import global_asset_registry
-        except ImportError:
-            global_asset_registry = None
-
-    job_seed = str(job_data.get("job_id", "") or script.get("title", "") or total_dur)
-    available_unique_photos: List[Path] = []
-    if global_asset_registry is not None and active_slot_key:
-        available_unique_photos = global_asset_registry.select_unique_photos(
-            candidate_photos=regular_photos,
-            needed_count=len(semantic_beats),
-            channel="thebasketballshows",
-            athlete_key=active_slot_key,
-            seed=job_seed
-        )
-        print(f"[SportsEngine] 🎯 [PositiveWhitelist] {len(available_unique_photos)} adet taze ve karıştırılmış onaylı görsel kilitlendi.")
-    else:
-        rng = random.Random(job_seed)
-        available_unique_photos = list(regular_photos)
-        rng.shuffle(available_unique_photos)
-
-    banned_keywords = []
-    qa_banned = []
-    if active_slot_key == "fisher":
-        banned_keywords = [
-            "duncan", "trophy", "billups", "stephenson", "clippers", "suns",
-            "orlando", "magic", "celtics", "2010", "yellow_scribble", "marker", "cardboard", "anime"
-        ]
-        qa_banned = ["Tim Duncan", "Chauncey Billups", "Lance Stephenson", "Larry OBrien trophy", "White House ceremony"]
-    elif active_slot_key == "harden":
-        banned_keywords = [
-            "76ers", "philadelphia", "sixers", "scoreboard", "108", "111", "armpit", "crop", "toshiba", "cavs_logo"
-        ]
-        qa_banned = ["Philadelphia 76ers player", "television scoreboard overlay", "toshiba text banner", "floater layup shot"]
-
-    for cut_i, beat in enumerate(semantic_beats):
+    for cut_i in range(total_cuts):
         out_clip = cuts_dir / f"cut_{cut_i:03d}.mp4"
         cut_files.append(str(out_clip))
-        actual_cut_len = beat["duration"]
-        frames = int(round(actual_cut_len * fps))
-        cut_start = beat["start"]
-        cut_end = beat["end"]
-        cut_mid = (cut_start + cut_end) / 2.0
+        frames = int(actual_cut_len * fps)
 
-        chosen_photo = None
-
-        # 1. HEDEFE KİLİTLİ ZAMAN ÇİZELGESİ SLOTLARI (SlotVisualDirector)
-        if active_slot_key and active_slot_key in TIMELINE_SLOT_REGISTRY:
-            slots = TIMELINE_SLOT_REGISTRY[active_slot_key]
-            for s_idx, slot in enumerate(slots):
-                if s_idx in used_slot_indices:
-                    continue
-                t_start, t_end = slot["time_range"]
-                if (t_start <= cut_mid <= t_end) or (cut_start <= t_start < cut_end):
-                    slot_target = photo_pool_dir / f"slot_{active_slot_key}_{s_idx:02d}.jpg"
-                    if not slot_target.exists():
-                        fetch_slot_image(slot, slot_target, downloads_dir, W, H)
-
-                    if slot_target.exists() and slot_target.stat().st_size > 10000:
-                        if timeline_guard is not None and timeline_guard.is_asset_used(slot_target):
-                            continue
-                        slot_dh = _compute_dhash(slot_target)
-                        is_dup = False
-                        if slot_dh:
-                            for pdh in placed_cut_dhashes:
-                                if _hamming_dist(slot_dh, pdh) <= 10:
-                                    is_dup = True
-                                    break
-                        if not is_dup:
-                            try:
-                                from visual_qa_guard import visual_qa_guard
-                                rep = visual_qa_guard.inspect_frame(slot_target, target_entity=primary_entity, banned_entities=qa_banned)
-                                if not rep.get("passed"):
-                                    issues_str = ", ".join(rep.get("issues", []))
-                                    print(f"[SportsEngine] 🚫 [SlotVisionFilter] {slot_target.name} reddedildi: {issues_str}")
-                                    continue
-                            except Exception as e_slot_qa:
-                                print(f"[SportsEngine] ⚠️ Slot QA hata verdi: {e_slot_qa}")
-                            chosen_photo = slot_target
-                            used_slot_indices.add(s_idx)
-                            print(f"[SportsEngine] 🎯 [SlotVisualDirector] Zaman kancası atandı ({slot['description']}): cut_{cut_i:03d} ({actual_cut_len:.2f}s)")
-                            break
-
-        # 2. İstatistik Anons Penceresi Kuralı (Kutu Skoru Tablosu Varsa)
-        if chosen_photo is None and box_score_img and (15.5 <= cut_mid <= 22.0):
+        # 1. Kural: İstatistik anons anında (%100 resmi NBA Kutu Skoru tablosu gösterilir)
+        if box_score_img and (stat_start_idx <= cut_i <= stat_end_idx):
             chosen_photo = box_score_img
+            if timeline_guard is not None:
+                timeline_guard.register_timeline_asset(chosen_photo)
+            if asset_validator is not None:
+                asset_validator.register_used_asset(chosen_photo)
+            # Kutu skoru tablosu net ve sabit okunabilmeli (hafif nefes alan zoom)
+            z_s, z_e = 1.00, 1.04
+            step = (z_e - z_s) / max(1, frames)
+            zp = f"zoompan=z='min(zoom+{step:.6f},{max(z_s, z_e):.2f})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={W}x{H}:fps={fps},fps={fps},setsar=1"
+            scale_w = int(W * 1.15)
+            scale_h = int(H * 1.15)
+            cmd = [
+                FFMPEG, "-y",
+                "-loop", "1", "-i", str(chosen_photo),
+                "-vf", f"scale={scale_w}:{scale_h}:force_original_aspect_ratio=increase,crop={W}:{H}:(in_w-{W})/2:(in_h-{H})/2,{zp}",
+                "-t", f"{actual_cut_len:.3f}",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "4.0", "-preset", "ultrafast",
+                "-an", str(out_clip)
+            ]
+            subprocess.run(cmd, capture_output=True, check=True)
+            continue
 
-        # 3. Genel Fotoğraf Havuzundan Pozitif Beyaz Liste ile Tüketim (Sıfır Döngü Garantisi)
-        if chosen_photo is None:
-            while available_unique_photos:
-                candidate_p = available_unique_photos.pop(0)
+        # 2. Kural: Ritmik Hibrit Video Kurgusu
+        # Tekli vuruşlarda (cut_i % 2 == 1) gerçek 1080p hareketli salon b-roll videoları (smaç, file swish, dripling, seyirci, arena)
+        use_video = (cut_i % 2 == 1) and bool(broll_videos)
+        video_done = False
+
+        if use_video and broll_videos:
+            chosen_broll = broll_videos[vid_idx % len(broll_videos)]
+            vid_idx += 1
+            offset = 1.0 + ((cut_i * 1.6) % 5.0)
+            video_done = extract_sports_video_cut(chosen_broll, out_clip, actual_cut_len, start_offset=offset, W=W, H=H, fps=fps)
+            if video_done:
+                print(f"[SportsEngine] 🎬 [Hybrid Video] cut_{cut_i:03d} -> {chosen_broll.name} (offset: {offset:.1f}s)")
+
+        if not video_done:
+            chosen_photo = None
+            while reg_photo_idx < len(regular_photos):
+                candidate_p = regular_photos[reg_photo_idx]
+                reg_photo_idx += 1
+                if candidate_p in used_photo_set:
+                    continue
                 if timeline_guard is not None and timeline_guard.is_asset_used(candidate_p):
                     continue
-                cand_dh = _compute_dhash(candidate_p)
-                if cand_dh:
-                    is_dup = any(_hamming_dist(cand_dh, pdh) <= 10 for pdh in placed_cut_dhashes)
-                    if is_dup:
-                        continue
                 chosen_photo = candidate_p
+                used_photo_set.add(candidate_p)
                 break
 
-        if chosen_photo is None:
-            # Kurtarma Kuralı: Asla aynı sporcu karesini tekrarlama! Küratörlü saha b-roll havuzuna başvur
-            if curated_sports_dir.exists():
-                broll_candidates = [
-                    p for p in (curated_sports_dir / "b_roll" / "court_action").glob("*.jpg")
-                    if p.name not in used_timeline_photo_names
-                ]
-                if broll_candidates:
-                    chosen_photo = broll_candidates[0]
-                    print(f"[SportsEngine] 🔄 [BrollWhitelist] Taze saha b-roll karesi yedeklendi: {chosen_photo.name} (cut_{cut_i:03d})")
+            # Eğer fotoğraf havuzu tükenirse kalan b-roll videolarından birini video olarak koy (ASLA döngüye girme!)
+            if chosen_photo is None and broll_videos:
+                chosen_broll = broll_videos[vid_idx % len(broll_videos)]
+                vid_idx += 1
+                offset = 0.5 + ((cut_i * 2.0) % 6.0)
+                video_done = extract_sports_video_cut(chosen_broll, out_clip, actual_cut_len, start_offset=offset, W=W, H=H, fps=fps)
+                if video_done:
+                    print(f"[SportsEngine] 🎬 [Fallback Video] cut_{cut_i:03d} -> {chosen_broll.name}")
+                    continue
 
-        if chosen_photo is None and regular_photos:
-            # Son güvenlik: Havuzda henüz kullanılmamış kare varsa onu al
-            unused_pool = [p for p in regular_photos if p.name not in used_timeline_photo_names]
-            if unused_pool:
-                chosen_photo = unused_pool[0]
-            else:
-                chosen_photo = regular_photos[(cut_i * 7) % len(regular_photos)]
-            print(f"[SportsEngine] 🔄 [UniquePick] Onaylı sporcu karesi atandı: {chosen_photo.name} (cut_{cut_i:03d})")
+            if chosen_photo is None:
+                # Havuz tükendiğinde veya tüm görseller kullanıldığında ASLA eski fotoğraflara başa sarılmaz!
+                # Katı Kural: Bir kaynak fotoğraf bir render boyunca yalnızca 1 kesmede kullanılabilir (max_occurrences_per_source = 1).
+                # İkinci kez çağrılması yasaktır, bu sebeple character_archive_image verilmez (None).
+                # FallbackEngine doğrudan Kademe 2 (varsa teyitli istatistik) veya Kademe 3 (Soyut Hareketli Doku) üretir.
+                if fallback_engine is not None:
+                    main_player = primary_entity
+                    fallback_engine.resolve_fail_safe_clip(
+                        output_clip_path=out_clip,
+                        duration=actual_cut_len,
+                        primary_entity=main_player,
+                        team_name=team_name,
+                        scene_text=script.get("title", ""),
+                        character_archive_image=None,
+                        scratch_dir=scratch_dir,
+                        cut_index=cut_i,
+                        total_cuts=total_cuts,
+                        width=W,
+                        height=H,
+                        fps=fps
+                    )
+                    assert out_clip.exists() and out_clip.stat().st_size > 1000, f"FallbackEngine klip üretemedi: {out_clip}"
+                    print(f"[SportsEngine] 🛡️ [Zero Black Screen] Tekil kaynak kuralı korundu (Soyut Doku): cut_{cut_i:03d}")
+                    continue
+                else:
+                    fallback_img = scratch_dir / f"safe_fallback_cut_{cut_i:03d}.jpg"
+                    if pipeline_integration is not None:
+                        pipeline_integration.generate_safe_fallback_background(
+                            output_path=fallback_img,
+                            project_type="basketball_analysis",
+                            scene_idx=cut_i,
+                            width=W,
+                            height=H
+                        )
+                    else:
+                        fb = Image.new("RGB", (W, H), (15, 23, 42))
+                        fb.save(fallback_img, "JPEG")
+                    chosen_photo = fallback_img
+                    print(f"[SportsEngine] 🛡️ Havuz tükendi, degrade arka plan atandı: cut_{cut_i:03d}")
 
-        if chosen_photo is not None:
-            used_timeline_photo_names.add(chosen_photo.name)
-            dh = _compute_dhash(chosen_photo)
-            if dh:
-                placed_cut_dhashes.append(dh)
-
-            # Dinamik Ken Burns: Punch-in, zoom-in ve zoom-out rotasyonu
+            # Dinamik Ken Burns: Punch-in, zoom-in ve zoom-out rotasyonu (Amatör stok video zorunluluğu kaldırıldı)
             repeat_cnt = timeline_guard.register_timeline_asset(chosen_photo) if timeline_guard is not None else 1
             if asset_validator is not None:
                 asset_validator.register_used_asset(chosen_photo)
@@ -1791,14 +1248,10 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
                     character_archive_image=None,
                     scratch_dir=scratch_dir,
                     cut_index=cut_i,
-                    total_cuts=total_cuts,
                     width=W,
                     height=H,
                     fps=fps
                 )
-                assert out_clip.exists() and out_clip.stat().st_size > 1000, f"FallbackEngine klip üretemedi: {out_clip}"
-                print(f"[SportsEngine] 🛡️ [Zero Black Screen] Tekil kaynak kuralı korundu (Soyut Doku): cut_{cut_i:03d}")
-                continue
             else:
                 cmd = [
                     FFMPEG, "-y",
@@ -1826,28 +1279,8 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
         "-c", "copy", str(master_visuals)
     ], capture_output=True, check=True)
 
-    # 5. Dinamik Altyazı Kartları (Referans Video Estetiği: Altın Çerçeveli Glassmorphism Kart + SPORTS SCIENCE Rozeti)
-    try:
-        from glassmorphism_subtitles import generate_glassmorphism_subtitles
-    except ImportError:
-        try:
-            from src.glassmorphism_subtitles import generate_glassmorphism_subtitles
-        except ImportError:
-            generate_glassmorphism_subtitles = None
-
-    if generate_glassmorphism_subtitles is not None:
-        sub_concat_file = generate_glassmorphism_subtitles(
-            script=script,
-            total_dur=total_dur,
-            scratch_dir=scratch_dir,
-            W=W,
-            H=H,
-            top_badge="SPORTS SCIENCE",
-            category="thebasketballshows",
-            sentence_boundaries=sentence_boundaries
-        )
-    else:
-        sub_concat_file = generate_basketball_subtitles_overlay(script, total_dur, scratch_dir, W=W, H=H)
+    # 5. Dinamik Altyazı Kartları (Referans Video Estetiği: Altın Çerçeveli Glassmorphism Kart)
+    sub_concat_file = generate_basketball_subtitles_overlay(script, total_dur, scratch_dir, W=W, H=H)
 
     # 6. Hip-hop Arka Plan Müziği ve Final Miks
     base_assets = Path(__file__).resolve().parent.parent / "assets"
@@ -1908,103 +1341,6 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
     # final.mp4 kopyası
     final_sym = work_dir / "final.mp4"
     shutil.copy2(str(final_video), str(final_sym))
-
-    # 7. Kapalı Döngü Otomatik VLM Görsel Kalite Kapısı (Closed-Loop Vision QA Gate)
-    try:
-        from visual_qa_guard import visual_qa_guard
-        qa_banned = []
-        if active_slot_key == "fisher":
-            qa_banned = ["Tim Duncan", "Duncan", "Larry OBrien trophy", "Pistons", "Billups"]
-        elif active_slot_key == "harden":
-            qa_banned = ["Philadelphia 76ers", "Sixers", "TV scoreboard", "toshiba", "floater", "layup"]
-
-        qa_passed, qa_reports = visual_qa_guard.audit_video(
-            video_path=final_video,
-            total_dur=total_dur,
-            target_entity=primary_entity,
-            scratch_dir=scratch_dir,
-            banned_entities=qa_banned,
-            semantic_beats=semantic_beats
-        )
-        if qa_passed:
-            print(f"[SportsEngine] 🏆 [VisualQAGuard] Tüm sahneler BAŞARIYLA ONAYLANDI (%100 First-Pass Accuracy).")
-        else:
-            print(f"[SportsEngine] 🔧 [VisualQAGuard] Hatalı kesmeler tespit edildi, otomatik kapalı döngü onarım başlatılıyor...")
-            repaired_count = 0
-            for qr in qa_reports:
-                if not qr.get("passed"):
-                    bad_ts = float(qr.get("timestamp", 0.0))
-                    for b_idx, b in enumerate(semantic_beats):
-                        if b["start"] <= bad_ts <= b["end"]:
-                            rep_cand = None
-                            for cand in regular_photos:
-                                cand_dh = _compute_dhash(cand)
-                                if cand_dh and cand_dh not in placed_cut_dhashes:
-                                    rep_cand = cand
-                                    placed_cut_dhashes.append(cand_dh)
-                                    break
-                            if not rep_cand and regular_photos:
-                                rep_cand = regular_photos[b_idx % len(regular_photos)]
-                            
-                            if rep_cand:
-                                cut_clip = cuts_dir / f"cut_{b_idx:03d}.mp4"
-                                cut_len = b["duration"]
-                                vf_filter = f"scale={W}*1.15:{H}*1.15,zoompan=z='min(zoom+0.0008,1.15)':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={W}x{H}"
-                                cmd_fix = [
-                                    FFMPEG, "-y",
-                                    "-loop", "1", "-i", str(rep_cand),
-                                    "-t", f"{cut_len:.3f}",
-                                    "-vf", vf_filter,
-                                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "baseline", "-level", "4.0", "-preset", "fast",
-                                    "-an", str(cut_clip)
-                                ]
-                                subprocess.run(cmd_fix, capture_output=True, check=True)
-                                repaired_count += 1
-                                print(f"[SportsEngine] 🛠️ cut_{b_idx:03d} ({bad_ts:.1f}s) onarıldı -> {rep_cand.name}")
-            
-            if repaired_count > 0:
-                print(f"[SportsEngine] 🔄 {repaired_count} kesme onarıldı, master_visuals ve final video yeniden derleniyor...")
-                subprocess.run([
-                    FFMPEG, "-y",
-                    "-f", "concat", "-safe", "0", "-i", str(concat_list),
-                    "-c", "copy", str(master_visuals)
-                ], capture_output=True, check=True)
-                subprocess.run(cmd_final, check=True)
-                shutil.copy2(str(final_video), str(final_sym))
-                print(f"[SportsEngine] 🏆 Master video onarılarak %100 kusursuz hale getirildi.")
-    except Exception as e_qa:
-        print(f"[SportsEngine] ℹ️ VisualQAGuard denetimi tamamlandı/atlandı: {e_qa}")
-
-    # 8. Küresel Hafızaya Kullanılan Görselleri Mühürle (Cross-Video Whitelist Memory)
-    try:
-        if global_asset_registry is not None and active_slot_key and used_timeline_photo_names:
-            global_asset_registry.register_job_assets(
-                channel="thebasketballshows",
-                athlete_key=active_slot_key,
-                used_filenames=list(used_timeline_photo_names)
-            )
-            print(f"[SportsEngine] 🔒 [GlobalMemory] {len(used_timeline_photo_names)} varlık bir sonraki video için hafızaya kilitlendi.")
-    except Exception as e_mem:
-        print(f"[SportsEngine] ⚠️ GlobalMemory kayıt istisnası: {e_mem}")
-
-    # 9. KESİN GÜVENCE: Tek Geçişli Transparan Sosyal CTA Overlay (Unutulması İmkânsız)
-    try:
-        from social_cta_overlay import apply_social_cta_overlay
-        cta_start = 44.5 if active_slot_key == "harden" else (49.0 if active_slot_key == "fisher" else max(10.0, total_dur - 4.5))
-        applied = apply_social_cta_overlay(
-            input_video=final_video,
-            output_video=final_video,
-            language="en",
-            show_at_start=False,
-            show_at_end=True,
-            start_time=cta_start,
-            display_duration=2.5 if active_slot_key == "harden" else 3.0
-        )
-        if applied:
-            shutil.copy2(str(final_video), str(final_sym))
-            print(f"[SportsEngine] ✨ [Native-CTA] Sosyal CTA katmanı final_video.mp4 üzerine başarıyla mühürlendi ({cta_start:.1f}s).")
-    except Exception as e_cta:
-        print(f"[SportsEngine] ⚠️ Native CTA giydirme istisnası: {e_cta}")
     
     size_mb = final_video.stat().st_size / (1024 * 1024)
     print(f"[SportsEngine] 🎉 MASTER VIDEO BAŞARIYLA ÜRETİLDİ: {final_video} ({size_mb:.2f} MB)")
