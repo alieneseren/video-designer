@@ -466,7 +466,8 @@ def fetch_slot_image(
 
     if curated_match and curated_match.exists() and curated_match.stat().st_size > 10000:
         slot_negatives = slot.get("negatives", [])
-        if slot_negatives:
+        # Doğrulanmış küratörlü b-roll dosyaları (b_roll dizinindekiler) genel slot negatifleriyle elenmez
+        if slot_negatives and "b_roll" not in str(curated_match):
             try:
                 from visual_qa_guard import visual_qa_guard
                 rep = visual_qa_guard.inspect_frame(curated_match, banned_entities=slot_negatives)

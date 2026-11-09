@@ -110,10 +110,11 @@ class VisualQAGuard:
                 pos_prompts = [
                     f"a high quality clear broadcast photo of {target_entity}, NBA basketball players, teams, or playoff celebrations" if target_entity else "a high quality NBA basketball game broadcast",
                     "a high quality medical scientific visual of human eye, pupil reflex, brain cortex tractography, or neural synapse",
+                    "3D sports science biomechanics quad muscle load anatomy analysis with kinetic force arrows",
                     "an authentic NBA digital shot clock, scoreboard, or basketball court action"
                 ]
                 neg_prompts = [
-                    "extreme armpit close up skin fold bad framing",
+                    "extreme close up armpit sweat bad framing",
                     "amateur tiktok screen recording with emoji and text overlay",
                     "blurry low quality pixelated 144p distorted frame",
                     "cardboard trading card photo of a player",
