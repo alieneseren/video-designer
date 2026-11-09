@@ -2980,7 +2980,26 @@ def run_job(job_file: Path, force_rebuild: bool = False):
             from social_cta_overlay import apply_social_cta_overlay
             cta_lang = str(job_data.get("language") or script.get("language") or "en").lower()
             update_status("rendering", 92, f"Transparan Abone Ol & Beğen CTA katmanı ekleniyor ({cta_lang})...")
-            apply_social_cta_overlay(video_file, video_file, language=cta_lang, show_at_start=False, show_at_end=True)
+            
+            # Proje bazlı özel CTA zamanlaması (Altyazı ve tartışma kancasını örtmez)
+            topic_combined = f"{script.get('title', '')} {job_data.get('title', '')}".lower()
+            cta_start = None
+            cta_dur = None
+            if "fisher" in topic_combined or "0.4" in topic_combined:
+                cta_start = 49.0
+                cta_dur = 3.0
+            elif "harden" in topic_combined or "deceleration" in topic_combined:
+                cta_start = 44.5
+                cta_dur = 2.5
+
+            apply_social_cta_overlay(
+                video_file, video_file,
+                language=cta_lang,
+                show_at_start=False,
+                show_at_end=True,
+                start_time=cta_start,
+                display_duration=cta_dur
+            )
         except Exception as e_cta:
             print(f"[Worker] ⚠️ Social CTA overlay uyarısı: {e_cta}")
 

@@ -489,97 +489,130 @@ DANGLING_TRAIL_TOKENS = {
 }
 
 
+APOSTROPHE_FIXES = {
+    "DIDNT": "DIDN'T",
+    "HARDENS": "HARDEN'S",
+    "FISHERS": "FISHER'S",
+    "TODAYS": "TODAY'S",
+    "COULDNT": "COULDN'T",
+    "WOULDNT": "WOULDN'T",
+    "SHOULDNT": "SHOULDN'T",
+    "DOESNT": "DOESN'T",
+    "DONT": "DON'T",
+    "CANT": "CAN'T",
+    "WONT": "WON'T",
+    "ISNT": "ISN'T",
+    "ARENT": "AREN'T",
+    "WASNT": "WASN'T",
+    "WERENT": "WEREN'T",
+    "THAT'S": "THAT'S",
+    "THATS": "THAT'S",
+    "WHAT'S": "WHAT'S",
+    "WHATS": "WHAT'S",
+    "LEBRONS": "LEBRON'S",
+    "SHAQS": "SHAQ'S",
+    "CURRYS": "CURRY'S",
+    "KOBES": "KOBE'S",
+    "WILTS": "WILT'S"
+}
+
+
+def clean_sub_word(w: str) -> str:
+    """
+    Altyazı kelimesini temizlerken kesme işaretlerini (DIDN'T, HARDEN'S, FISHER'S)
+    ve ondalık sayıları (0.4) kesinlikle korur.
+    """
+    if not w:
+        return ""
+    w = w.strip(' ,;:!?"()[]{}')
+    w = w.replace('’', "'").replace('‘', "'").replace('`', "'")
+    cleaned = re.sub(r"[^\w$€₺%'.]", '', w)
+    cleaned = cleaned.strip(". '")
+    cleaned = cleaned.upper()
+    if cleaned in APOSTROPHE_FIXES:
+        cleaned = APOSTROPHE_FIXES[cleaned]
+    return cleaned
+
+
+def is_decimal_token(w: str) -> bool:
+    """Ondalık sayı belirteci tespiti (Örn: 0.4, 0.2, 99.9)."""
+    return bool(re.match(r'^\d+\.\d+$', w))
+
+
 def tokenize_and_chunk_subtitles(clean_narr: str) -> List[List[str]]:
     """
     Doğal konuşma ritmine (clausal pacing) ve gramer kurallarına uygun altyazı kartları üretir.
     Sarkık edat/bağlaçları (OF, THE, IN vb.) asla kart sonunda bırakmaz;
+    ondalık sayıları (0.4, 0.2) noktasından bölmez ve bağlı olduğu kelimeyle mühürler;
     kapanış sorularını (WHICH WOULD YOU PICK?) parçalamadan tek kartta mühürler.
     """
-    # 1. Cümleleri ayır
-    sentences = re.split(r'([.!?])', clean_narr)
-    full_sentences = []
-    for i in range(0, len(sentences) - 1, 2):
-        s_text = (sentences[i] + sentences[i + 1]).strip()
-        if s_text:
-            full_sentences.append(s_text)
-    if len(sentences) % 2 == 1 and sentences[-1].strip():
-        full_sentences.append(sentences[-1].strip())
-
-    if not full_sentences:
-        full_sentences = [clean_narr]
+    # 1. Cümleleri ayır (Ondalık sayıları bölmeyen korumalı ayrıştırıcı)
+    sent_delimiters = r'(?<!\d)\.|\.(?!\d)|[!?]+'
+    raw_sentences = [s.strip() for s in re.split(sent_delimiters, clean_narr) if s.strip()]
+    if not raw_sentences:
+        raw_sentences = [clean_narr]
 
     all_cards: List[List[str]] = []
+    cl_pattern = r'[,:;]|(?<!\d)\.|\.(?!\d)'
 
-    for sent in full_sentences:
-        # Cümleyi noktalama işaretlerine göre nefes öbeklerine (clauses) böl
-        clauses = re.split(r'[,:;!?.]', sent)
+    for sent in raw_sentences:
+        sent = sent.replace('—', ' ').replace('–', ' ').replace('--', ' ')
+        # Birleşik sayı ve yüzdelik ifadeleri tek kartta mühürleme kuralı (Keep 99TH PERCENTILE unified)
+        sent = re.sub(r'\bninety[- ]ninth\s+percentile\b', '99TH_PERCENTILE', sent, flags=re.I)
+        sent = re.sub(r'\b(\d+(?:st|nd|rd|th))\s+percentile\b', r'\1_PERCENTILE', sent, flags=re.I)
+        # Cümleyi noktalama işaretlerine göre nefes öbeklerine (clauses) böl (ondalık sayıları koru)
+        clauses = [c.strip() for c in re.split(cl_pattern, sent) if c.strip()]
         sent_cards: List[List[str]] = []
 
         for cl in clauses:
-            cl = cl.strip()
-            if not cl:
-                continue
-            words = cl.split()
+            cl_clean = cl.replace('-', ' ')
+            raw_words = cl_clean.split()
+            words = [clean_sub_word(w) for w in raw_words]
+            words = [w for w in words if w]
             if not words:
                 continue
 
-            # Eğer öbek 2 ila 4 kelime ise doğrudan tek kart yap (asla bölme!)
-            if len(words) <= 4:
-                sent_cards.append([re.sub(r'[^\w$€₺%]', '', w).upper() for w in words if w.strip()])
-                continue
-            elif len(words) == 5:
-                # 5 kelimelik öbek: 3 + 2 veya 2 + 3 böl
-                w3 = re.sub(r'[^\w$€₺%]', '', words[2]).upper()
-                if w3 in DANGLING_TRAIL_TOKENS:
-                    sent_cards.append([re.sub(r'[^\w$€₺%]', '', w).upper() for w in words[:2] if w.strip()])
-                    sent_cards.append([re.sub(r'[^\w$€₺%]', '', w).upper() for w in words[2:] if w.strip()])
-                else:
-                    sent_cards.append([re.sub(r'[^\w$€₺%]', '', w).upper() for w in words[:3] if w.strip()])
-                    sent_cards.append([re.sub(r'[^\w$€₺%]', '', w).upper() for w in words[3:] if w.strip()])
+            # Eğer öbek 2 ila 5 kelime ise doğrudan tek kart yap (asla bölme!)
+            # 2 satırlı cam kartta (Örn: SLIDES SIX FEET / PAST HIM) kusursuz okunur.
+            if len(words) <= 5:
+                sent_cards.append(words)
                 continue
 
             # 6 ve daha fazla kelime: Doğal okuma öbeği (2-4 kelime)
             i = 0
             while i < len(words):
                 rem = len(words) - i
-                if rem <= 4:
-                    # Kalanlar 4 veya daha az ise doğrudan tek kart yap, ancak son kelime edat ise ve rem > 2 ise böl
-                    last_w = re.sub(r'[^\w$€₺%]', '', words[-1]).upper()
-                    sent_cards.append([re.sub(r'[^\w$€₺%]', '', w).upper() for w in words[i:] if w.strip()])
+                if rem <= 5:
+                    # Kalanlar 5 veya daha az ise doğrudan tek kart yap
+                    sent_cards.append(words[i:])
                     break
-                elif rem == 5:
-                    # 5 kelime kaldı: Sonunda veya ortasında edat kalmayacak şekilde 2+3 veya 3+2 böl
-                    w2 = re.sub(r'[^\w$€₺%]', '', words[i + 1]).upper()
-                    w3 = re.sub(r'[^\w$€₺%]', '', words[i + 2]).upper()
-                    if w3 in DANGLING_TRAIL_TOKENS or (w2 not in DANGLING_TRAIL_TOKENS and w3 in DANGLING_TRAIL_TOKENS):
-                        take = 2
-                    else:
-                        take = 3
-                    sent_cards.append([re.sub(r'[^\w$€₺%]', '', w).upper() for w in words[i:i + take] if w.strip()])
-                    i += take
-                    continue
 
-                # Standart 3 veya 4 kelime seç, ancak son kelimenin ASLA sarkık edat/bağlaç olmasına izin verme!
+                # Standart 3 veya 4 kelime seç
                 take = 3
-                # 3. kelime dangling ise ve 4. kelime dangling değilse 4 kelime al
-                w3 = re.sub(r'[^\w$€₺%]', '', words[i + 2]).upper() if i + 2 < len(words) else ''
-                w4 = re.sub(r'[^\w$€₺%]', '', words[i + 3]).upper() if i + 3 < len(words) else ''
 
-                if w3 in DANGLING_TRAIL_TOKENS and w4 and w4 not in DANGLING_TRAIL_TOKENS and rem >= 4:
+                # Sayısal bağlama kuralı: 3. kelime 0.4 gibi ondalıksa ve rem >= 4 ise, 4 kelime al ("WOULD FISHER'S 0.4 MIRACLE")
+                if i + 2 < len(words) and is_decimal_token(words[i + 2]) and rem >= 4:
                     take = 4
-                elif w3 in DANGLING_TRAIL_TOKENS:
-                    # Hem 3 hem 4 dangling ise (örn: OF THE), 2 kelime al ki edat sonraki karta devretsin
-                    take = 2
-                elif w4 in DANGLING_TRAIL_TOKENS:
+                elif i + 1 < len(words) and is_decimal_token(words[i + 1]) and rem >= 3:
                     take = 3
                 else:
-                    take = 3
+                    w3 = words[i + 2] if i + 2 < len(words) else ''
+                    w4 = words[i + 3] if i + 3 < len(words) else ''
 
-                # Kesin Anti-Orphan Güvencesi: Kartın son kelimesi DANGLING_TRAIL_TOKENS ise geri çek (min 2 kelime)
-                while take > 2 and re.sub(r'[^\w$€₺%]', '', words[i + take - 1]).upper() in DANGLING_TRAIL_TOKENS:
+                    if w3 in DANGLING_TRAIL_TOKENS and w4 and w4 not in DANGLING_TRAIL_TOKENS and rem >= 4:
+                        take = 4
+                    elif w3 in DANGLING_TRAIL_TOKENS:
+                        take = 2
+                    elif w4 in DANGLING_TRAIL_TOKENS:
+                        take = 3
+                    else:
+                        take = 3
+
+                # Kesin Anti-Orphan Güvencesi: Kartın son kelimesi DANGLING_TRAIL_TOKENS veya tek başına ondalık sayı ise geri çek
+                while take > 2 and (words[i + take - 1] in DANGLING_TRAIL_TOKENS or is_decimal_token(words[i + take - 1])):
                     take -= 1
 
-                sent_cards.append([re.sub(r'[^\w$€₺%]', '', w).upper() for w in words[i:i + take] if w.strip()])
+                sent_cards.append(words[i:i + take])
                 i += take
 
         # Cümle içi 1 kelimelik öksüz kartları bitişik karta kaynaştır
@@ -608,6 +641,9 @@ def tokenize_and_chunk_subtitles(clean_narr: str) -> List[List[str]]:
         else:
             comb = all_cards[-2] + all_cards[-1]
             mid = (len(comb) + 1) // 2
+            # Sayısal bağlama kuralı: Asla ondalık sayı (0.4) ile bitirme, sayıyı sonraki isimle birleştir
+            if mid < len(comb) and is_decimal_token(comb[mid - 1]):
+                mid += 1
             all_cards[-2] = comb[:mid]
             all_cards[-1] = comb[mid:]
 
@@ -622,11 +658,13 @@ def generate_glassmorphism_subtitles(
     H: int = 1920,
     top_badge: Optional[str] = None,
     category: str = "general",
-    visual_plan: Optional[Dict[str, Any]] = None
+    visual_plan: Optional[Dict[str, Any]] = None,
+    sentence_boundaries: Optional[List[Dict[str, Any]]] = None
 ) -> Path:
     """
     Tüm anlatımı 2-4 kelimelik doğal kartlara böler, kanal temasına göre şeffaf PNG üretir
     ve FFmpeg concat listesi (glass_subtitles_concat.txt) oluşturur.
+    SentenceBoundary desteği ile kümülatif altyazı gecikmesi %100 sıfırlanır.
     """
     scratch_dir = Path(scratch_dir)
     theme = get_channel_theme(category)
@@ -686,40 +724,24 @@ def generate_glassmorphism_subtitles(
         else:
             effective_top_badge = raw_badge
 
-    scenes = script.get("scenes", [])
-    raw_texts = []
-    if scenes and isinstance(scenes, list):
-        for sc in scenes:
-            t = sc.get("narration") or sc.get("text") or ""
-            if t.strip():
-                raw_texts.append(t.strip())
-    else:
-        raw_text = script.get("narration") or script.get("story") or script.get("body") or script.get("title", "")
-        if isinstance(raw_text, list):
-            raw_text = " ".join(raw_text)
-        raw_texts.append(str(raw_text).strip())
-
-    full_narr = " ".join(raw_texts)
-    clean_narr = re.sub(r'(\b\w+)\s*[-—]\s*(\w+\b)', r'\1 \2', full_narr)
-    clean_narr = clean_narr.replace('—', ' , ').replace('...', ' , ')
-    clean_narr = re.sub(r'\s+', ' ', clean_narr).strip()
-
-    # Gramer ve öksüz korumalı doğal kartlara böl
-    card_phrases = tokenize_and_chunk_subtitles(clean_narr)
-
-    cards_data = []
-    for cp in card_phrases:
-        if len(cp) <= 3:
-            lines = [" ".join(cp)]
-        else:
-            mid = (len(cp) + 1) // 2
-            lines = [" ".join(cp[:mid]), " ".join(cp[mid:])]
-        char_count = sum(len(w) for w in cp)
-        cards_data.append({"lines": lines, "chars": char_count})
-
-    if not cards_data:
-        fallback_title = script.get("title") or "EXCLUSIVE SHORTS"
-        cards_data = [{"lines": [fallback_title.upper()[:25]], "chars": len(fallback_title)}]
+    # 2. Otomatik SentenceBoundary tespiti (Dosyadan veya parametreden)
+    if not sentence_boundaries:
+        sb_candidates = [
+            scratch_dir / "sentence_boundaries.json",
+            scratch_dir.parent / "sentence_boundaries.json",
+            scratch_dir.parent / "voiceover_boundaries.json"
+        ]
+        for sbc in sb_candidates:
+            if sbc.exists():
+                try:
+                    import json
+                    loaded_sb = json.loads(sbc.read_text(encoding="utf-8"))
+                    if isinstance(loaded_sb, list) and len(loaded_sb) > 0:
+                        sentence_boundaries = loaded_sb
+                        print(f"[SubtitlesEngine] 🎯 {len(sentence_boundaries)} adet SentenceBoundary dosyasından okundu: {sbc.name}")
+                        break
+                except Exception:
+                    pass
 
     sub_dir = scratch_dir / "glass_sub_cards"
     if sub_dir.exists():
@@ -727,25 +749,115 @@ def generate_glassmorphism_subtitles(
     sub_dir.mkdir(parents=True, exist_ok=True)
     concat_lines = []
 
-    # Süre dağıtımı (Son karta en az 2.20s garanti)
-    num_cards = len(cards_data)
+    cards_data = []
     card_durations = []
-    if num_cards == 1:
-        card_durations = [total_dur]
+
+    if sentence_boundaries and isinstance(sentence_boundaries, list) and len(sentence_boundaries) > 0:
+        # ── KELİME & CÜMLE SEVİYESİNDE SALİSE KİLİTLİ ALTYAZI (SIFIR KÜMÜLATİF GECİKME) ──
+        num_sents = len(sentence_boundaries)
+        for s_idx, sb in enumerate(sentence_boundaries):
+            raw_s = sb.get("text", "")
+            clean_s = re.sub(r'(\b\w+)\s*[-—]\s*(\w+\b)', r'\1 \2', raw_s)
+            clean_s = clean_s.replace('—', ' , ').replace('...', ' , ')
+            clean_s = re.sub(r'\s+', ' ', clean_s).strip()
+            # Birleşik sayı ve yüzdelik ifadeleri mühürleme kuralı (Keep 99TH PERCENTILE unified)
+            clean_s = re.sub(r'\bninety[- ]ninth\s+percentile\b', '99TH_PERCENTILE', clean_s, flags=re.I)
+            clean_s = re.sub(r'\b(\d+(?:st|nd|rd|th))\s+percentile\b', r'\1_PERCENTILE', clean_s, flags=re.I)
+            if not clean_s:
+                continue
+
+            c_phrases = tokenize_and_chunk_subtitles(clean_s)
+            if not c_phrases:
+                continue
+
+            s_start = float(sb.get("offset", 0.0))
+            if s_idx == 0:
+                s_start = 0.0
+
+            if s_idx + 1 < num_sents:
+                next_start = float(sentence_boundaries[s_idx + 1].get("offset", s_start + sb.get("duration", 2.0)))
+            else:
+                next_start = total_dur
+
+            s_window = max(0.8, next_start - s_start)
+            # Kelime sayısı ve karakter uzunluğu ağırlıklı adil süre dağılımı
+            # 4-5 kelimelik kartlara (Örn: "SLIDES SIX FEET PAST HIM") en az 1.30s+ rahat okuma süresi garanti eder
+            weights = [max(1.0, len(cp) * 0.80 + sum(len(w) for w in cp) * 0.10) for cp in c_phrases]
+            total_w = sum(weights)
+            s_durs = [max(0.60, round(s_window * (w / max(0.001, total_w)), 3)) for w in weights]
+            diff = round(s_window - sum(s_durs), 3)
+            s_durs[-1] = max(0.65, round(s_durs[-1] + diff, 3))
+
+            for cp_idx, cp in enumerate(c_phrases):
+                if len(cp) <= 3:
+                    lines = [" ".join(cp).replace("_PERCENTILE", " PERCENTILE")]
+                else:
+                    mid = (len(cp) + 1) // 2
+                    lines = [
+                        " ".join(cp[:mid]).replace("_PERCENTILE", " PERCENTILE"),
+                        " ".join(cp[mid:]).replace("_PERCENTILE", " PERCENTILE")
+                    ]
+                cp_chars = sum(len(w) for w in cp)
+                cp_dur = s_durs[cp_idx]
+
+                cards_data.append({"lines": lines, "chars": cp_chars})
+                card_durations.append(cp_dur)
     else:
-        last_card_target = max(2.20, min(4.00, total_dur * 0.16))
-        remaining_time = max(total_dur - last_card_target, float(num_cards - 1) * 1.05)
-        remaining_chars = max(1, sum(cards_data[i]["chars"] for i in range(num_cards - 1)))
+        # ── KLASİK KARAKTER DAĞILIMI (Fallback Modu) ──
+        scenes = script.get("scenes", [])
+        raw_texts = []
+        if scenes and isinstance(scenes, list):
+            for sc in scenes:
+                t = sc.get("narration") or sc.get("text") or ""
+                if t.strip():
+                    raw_texts.append(t.strip())
+        else:
+            raw_text = script.get("narration") or script.get("story") or script.get("body") or script.get("title", "")
+            if isinstance(raw_text, list):
+                raw_text = " ".join(raw_text)
+            raw_texts.append(str(raw_text).strip())
 
-        running_sum = 0.0
-        for i in range(num_cards - 1):
-            c_dur = remaining_time * (cards_data[i]["chars"] / remaining_chars)
-            c_dur = max(1.05, c_dur)
-            card_durations.append(c_dur)
-            running_sum += c_dur
+        full_narr = " ".join(raw_texts)
+        clean_narr = re.sub(r'(\b\w+)\s*[-—]\s*(\w+\b)', r'\1 \2', full_narr)
+        clean_narr = clean_narr.replace('—', ' , ').replace('...', ' , ')
+        clean_narr = re.sub(r'\s+', ' ', clean_narr).strip()
 
-        final_card_dur = max(2.20, round(total_dur - running_sum, 3))
-        card_durations.append(final_card_dur)
+        # Gramer ve öksüz korumalı doğal kartlara böl
+        card_phrases = tokenize_and_chunk_subtitles(clean_narr)
+
+        for cp in card_phrases:
+            if len(cp) <= 3:
+                lines = [" ".join(cp).replace("_PERCENTILE", " PERCENTILE")]
+            else:
+                mid = (len(cp) + 1) // 2
+                lines = [
+                    " ".join(cp[:mid]).replace("_PERCENTILE", " PERCENTILE"),
+                    " ".join(cp[mid:]).replace("_PERCENTILE", " PERCENTILE")
+                ]
+            char_count = sum(len(w) for w in cp)
+            cards_data.append({"lines": lines, "chars": char_count})
+
+        if not cards_data:
+            fallback_title = script.get("title") or "EXCLUSIVE SHORTS"
+            cards_data = [{"lines": [fallback_title.upper()[:25]], "chars": len(fallback_title)}]
+
+        num_cards = len(cards_data)
+        if num_cards == 1:
+            card_durations = [total_dur]
+        else:
+            last_card_target = max(2.20, min(4.00, total_dur * 0.16))
+            remaining_time = max(total_dur - last_card_target, float(num_cards - 1) * 1.05)
+            remaining_chars = max(1, sum(cards_data[i]["chars"] for i in range(num_cards - 1)))
+
+            running_sum = 0.0
+            for i in range(num_cards - 1):
+                c_dur = remaining_time * (cards_data[i]["chars"] / remaining_chars)
+                c_dur = max(1.05, c_dur)
+                card_durations.append(c_dur)
+                running_sum += c_dur
+
+            final_card_dur = max(2.20, round(total_dur - running_sum, 3))
+            card_durations.append(final_card_dur)
 
     # Üst rozet tam sözleşme penceresinde (badge_start..badge_end, ör: 0.0s - 4.5s) görünür, ardından kaybolur
     accumulated_time = 0.0

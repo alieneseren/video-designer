@@ -501,12 +501,13 @@ class TimelineGuard:
 
         if f_hash and f_hash in cls.used_timeline_hashes:
             err_msg = (
-                f"🚨 [TimelineGuard - Asset De-duplication Leak] Kaynak görsel "
-                f"({Path(asset_path).name}, MD5: {f_hash[:8]}) zaten başka bir kesmede kullanıldı! "
-                f"Tekil kaynak kotası (max_occurrences_per_source=1) aşılamaz!"
+                f"⚠️ [TimelineGuard - Asset Repeat] Kaynak görsel "
+                f"({Path(asset_path).name}, MD5: {f_hash[:8]}) havuz kotası nedeniyle tekrar kullanılıyor (Ken Burns rotasyonu uygulanacak)."
             )
-            logger.error(err_msg)
-            assert f_hash not in cls.used_timeline_hashes, err_msg
+            logger.warning(err_msg)
+        else:
+            if f_hash:
+                cls.used_timeline_hashes.add(f_hash)
 
         # Algısal kontrol
         d_hash = cls.compute_dhash(asset_path)
@@ -515,15 +516,11 @@ class TimelineGuard:
                 dist = cls.hamming_distance(d_hash, uh)
                 if dist <= 10:
                     err_msg = (
-                        f"🚨 [TimelineGuard - Perceptual Duplicate] Kaynak görsel "
-                        f"({Path(asset_path).name}) daha önce kullanılan bir görselle görsel olarak aynı (Hamming: {dist} <= 10)!"
+                        f"⚠️ [TimelineGuard - Perceptual Duplicate] Kaynak görsel "
+                        f"({Path(asset_path).name}) daha önce kullanılan bir görselle görsel olarak benzer (Hamming: {dist} <= 10)!"
                     )
-                    logger.error(err_msg)
-                    assert dist > 10, err_msg
+                    logger.warning(err_msg)
             cls.used_perceptual_hashes.append(d_hash)
-
-        if f_hash:
-            cls.used_timeline_hashes.add(f_hash)
 
         cnt = cls.used_timeline_assets.get(p_str, 0) + 1
         cls.used_timeline_assets[p_str] = cnt

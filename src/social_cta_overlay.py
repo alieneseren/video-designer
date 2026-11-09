@@ -187,8 +187,8 @@ def render_cta_frame(
     cw = pad_x * 2 + badge_w + 12 + btn_w + sep_pad * 2 + like_w + sep_pad * 2 + bell_w
     ch = 82
     cx = w // 2
-    # Altyazı (y ≈ 1500) üstünde, oyuncunun yüz/göğüs bölgesinden uzakta alt çeyrek güvenli bölge (y ≈ 1420)
-    cy = int(h * 0.74) + int(slide_y) if is_shorts else int(h * 0.82) + int(slide_y)
+    # Altyazı (y ≈ 1550) üstünde, oyuncunun yüz/göğüs bölgesinden uzakta alt çeyrek güvenli bölge (y ≈ 0.80 * h)
+    cy = int(h * 0.80) + int(slide_y) if is_shorts else int(h * 0.82) + int(slide_y)
 
     x0 = cx - cw // 2
     y0 = cy - ch // 2
@@ -332,54 +332,8 @@ def render_cta_frame(
         rip_alpha = int((1.0 - r_prog) * 180 * alpha_mul)
         draw.ellipse([bell_cx - rip_rad, bell_cy - rip_rad, bell_cx + rip_rad, bell_cy + rip_rad], outline=(255, 215, 0, rip_alpha), width=2)
 
-    # H) İmleç (Pointer Hand) Hareketi
-    # İmleç yörüngesi:
-    # 0.5s - 1.2s: Ekran altından Abone Ol butonuna gelir
-    # 1.2s - 1.3s: Abone Ol'a basar
-    # 1.5s - 2.3s: Like butonuna süzülür
-    # 2.3s - 2.4s: Like'a basar
-    # 2.5s - 3.3s: Çana süzülür
-    # 3.3s - 3.4s: Çana basar
-    # 3.6s - 4.2s: Aşağı süzülür ve kaybolur
-    if 0.5 <= t <= 4.2:
-        if t < 1.2:
-            prog = (t - 0.5) / 0.7
-            e_p = math.sin(prog * (math.pi / 2))
-            cur_x = int((bx_mid + 80) + (1.0 - e_p) * 60)
-            cur_y = int(by_mid + 6 + (1.0 - e_p) * 90)
-            is_click = False
-        elif t <= 1.35:
-            cur_x = bx_mid + 80
-            cur_y = by_mid + 6
-            is_click = True
-        elif t < 2.3:
-            prog = (t - 1.35) / 0.95
-            e_p = 0.5 - 0.5 * math.cos(prog * math.pi)
-            cur_x = int((bx_mid + 80) + e_p * (like_cx - (bx_mid + 80)))
-            cur_y = int((by_mid + 6) + e_p * (like_cy - (by_mid + 6)))
-            is_click = False
-        elif t <= 2.45:
-            cur_x = like_cx
-            cur_y = like_cy
-            is_click = True
-        elif t < 3.3:
-            prog = (t - 2.45) / 0.85
-            e_p = 0.5 - 0.5 * math.cos(prog * math.pi)
-            cur_x = int(like_cx + e_p * (bell_cx - like_cx))
-            cur_y = int(like_cy + e_p * (bell_cy - like_cy))
-            is_click = False
-        elif t <= 3.45:
-            cur_x = bell_cx
-            cur_y = bell_cy
-            is_click = True
-        else:
-            prog = (t - 3.45) / 0.75
-            cur_x = int(bell_cx + prog * 40)
-            cur_y = int(bell_cy + prog * 70)
-            is_click = False
-
-        draw_pointer_hand(draw, cur_x, cur_y, scale=1.0, is_clicking=is_click)
-
+    # H) İmleç (Pointer Hand) Hareketi: Avant-garde temiz vektör tasarımı gereği sahte fare imleci kaldırıldı.
+    # Buton animasyonları (Abone Ol renk geçişi, like ve çan parıltıları) doğal mikroyapıyla çalışır.
     return frame
 
 
@@ -511,7 +465,9 @@ def apply_social_cta_overlay(
     output_video: Union[str, Path],
     language: str = "en",
     show_at_start: bool = False,
-    show_at_end: bool = True
+    show_at_end: bool = True,
+    start_time: Optional[float] = None,
+    display_duration: Optional[float] = None
 ) -> bool:
     """
     Herhangi bir videoya kanalın dilinde hareketli transparan "Abone Ol + Beğen + Bildirim"
@@ -544,13 +500,20 @@ def apply_social_cta_overlay(
         return False
 
     # Overlay zamanlama formülü:
-    # Sonda (Videonun bitimine 5.5 sn kala) tek seferlik pürüzsüz animasyon
-    # NOT: -stream_loop -1 kullanılmaz; setpts ile tam end_start anından başlatılır (çift sıçramayı / double-bounce önler)
+    # Sonda (Videonun bitimine ~6.2 sn kala girer veya belirlenen start_time anında başlar)
+    # Kapanıştaki tartışma/yorum sorusunun ve başlıkların üzerine binmez.
     tmp_out = out_p if in_p != out_p else out_p.parent / f"_cta_tmp_{out_p.name}"
 
     if show_at_end and not show_at_start:
-        end_start = max(6.0, dur - 5.5)
-        filter_complex = f"[1:v]setpts=PTS-STARTPTS+{end_start:.3f}/TB[ctav];[0:v][ctav]overlay=x=0:y=0:enable='gte(t,{end_start:.3f})':eof_action=pass[outv]"
+        if start_time is not None:
+            end_start = max(1.0, float(start_time))
+            dur_val = float(display_duration or 2.0)
+            end_stop = min(dur, end_start + dur_val)
+        else:
+            end_start = max(6.0, dur - 6.2)
+            dur_val = float(display_duration or 1.8)
+            end_stop = min(dur, end_start + dur_val)
+        filter_complex = f"[1:v]setpts=PTS-STARTPTS+{end_start:.3f}/TB[ctav];[0:v][ctav]overlay=x=0:y=0:enable='between(t,{end_start:.3f},{end_stop:.3f})':eof_action=pass[outv]"
         cmd = [
             "ffmpeg", "-y",
             "-i", str(in_p),
