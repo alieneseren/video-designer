@@ -1408,15 +1408,15 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
                     photo_pool.append(target_p)
             print(f"[SportsEngine] 🏆 Küratörlü havuzdan {len(photo_pool)} adet onaylı {athlete_key} görseli yüklendi.")
 
-    # ── B & C) ÇOKLU SORGU GENİŞLETMESİ & MİNİMUM 25+ ONAYLI NBA MAÇ GÖRSELİ HAVUZU ──
-    # Aday Havuzu Kıtlığı (Fetch Starvation) ve 3 Görselli Döngü Hatalarını Tamamen Ortadan Kaldırır
-    if len(photo_pool) >= 12:
-        target_photo_count = len(photo_pool)
-        print(f"[SportsEngine] 💎 Küratörlü sporcu havuzu tam kapasite ({len(photo_pool)} görsel). Web araması atlandı, %100 doğrulanmış arşiv kilitlendi.")
+    # ── B & C) ÇOKLU SORGU GENİŞLETMESİ & MİNİMUM 30+ ONAYLI NBA MAÇ GÖRSELİ HAVUZU ──
+    # Aday Havuzu Kıtlığı (Fetch Starvation) ve Döngü Hatalarını Tamamen Ortadan Kaldırır
+    estimated_cuts = max(10, int(math.ceil(total_dur / 2.0)))
+    target_photo_count = max(30, estimated_cuts + 3)
+
+    if len(photo_pool) >= target_photo_count:
+        print(f"[SportsEngine] 💎 Küratörlü sporcu havuzu tam kapasite ({len(photo_pool)} görsel >= hedef {target_photo_count}). Web araması atlandı, %100 doğrulanmış arşiv kilitlendi.")
     else:
-        estimated_cuts = max(8, int(math.ceil(total_dur / 2.20)))
-        target_photo_count = max(20, estimated_cuts + 3)
-        print(f"[SportsEngine] 🔍 Çoklu-sorgu genişletmesi (Multi-Query Expansion) ve SigLIP doğrulama başlatılıyor (Hedef: En az {target_photo_count} görsel)...")
+        print(f"[SportsEngine] 🔍 Havuzda {len(photo_pool)} görsel var, hedef: {target_photo_count}. Çoklu-sorgu genişletmesi (Multi-Query Expansion) ve SigLIP doğrulama başlatılıyor...")
     if len(photo_pool) < target_photo_count and asset_fetcher is not None:
         detected_year = query_builder.extract_year(str(script), entity=primary_entity) if query_builder is not None else None
         opp_ent = None
@@ -1683,7 +1683,7 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
                         is_dup = False
                         if slot_dh:
                             for pdh in placed_cut_dhashes:
-                                if _hamming_dist(slot_dh, pdh) <= 10:
+                                if _hamming_dist(slot_dh, pdh) <= 5:
                                     is_dup = True
                                     break
                         if not is_dup:
@@ -1702,42 +1702,70 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
                             break
 
         # 2. İstatistik Anons Penceresi Kuralı (Kutu Skoru Tablosu Varsa)
-        if chosen_photo is None and box_score_img and (15.5 <= cut_mid <= 22.0):
+        if chosen_photo is None and box_score_img and (15.5 <= cut_mid <= 22.0) and box_score_img.name not in used_timeline_photo_names:
             chosen_photo = box_score_img
 
         # 3. Genel Fotoğraf Havuzundan Pozitif Beyaz Liste ile Tüketim (Sıfır Döngü Garantisi)
         if chosen_photo is None:
             while available_unique_photos:
                 candidate_p = available_unique_photos.pop(0)
+                if candidate_p.name in used_timeline_photo_names:
+                    continue
                 if timeline_guard is not None and timeline_guard.is_asset_used(candidate_p):
                     continue
                 cand_dh = _compute_dhash(candidate_p)
                 if cand_dh:
-                    is_dup = any(_hamming_dist(cand_dh, pdh) <= 10 for pdh in placed_cut_dhashes)
+                    is_dup = any(_hamming_dist(cand_dh, pdh) <= 5 for pdh in placed_cut_dhashes)
                     if is_dup:
                         continue
                 chosen_photo = candidate_p
                 break
 
-        if chosen_photo is None:
-            # Kurtarma Kuralı: Asla aynı sporcu karesini tekrarlama! Küratörlü saha b-roll havuzuna başvur
-            if curated_sports_dir.exists():
-                broll_candidates = [
-                    p for p in (curated_sports_dir / "b_roll" / "court_action").glob("*.jpg")
-                    if p.name not in used_timeline_photo_names
-                ]
-                if broll_candidates:
-                    chosen_photo = broll_candidates[0]
-                    print(f"[SportsEngine] 🔄 [BrollWhitelist] Taze saha b-roll karesi yedeklendi: {chosen_photo.name} (cut_{cut_i:03d})")
-
+        # 4. Kurtarma Kuralı 1: regular_photos havuzunda henüz kullanılmamış kareler
         if chosen_photo is None and regular_photos:
-            # Son güvenlik: Havuzda henüz kullanılmamış kare varsa onu al
             unused_pool = [p for p in regular_photos if p.name not in used_timeline_photo_names]
-            if unused_pool:
-                chosen_photo = unused_pool[0]
+            for candidate_p in unused_pool:
+                cand_dh = _compute_dhash(candidate_p)
+                if cand_dh and any(_hamming_dist(cand_dh, pdh) <= 5 for pdh in placed_cut_dhashes):
+                    continue
+                chosen_photo = candidate_p
+                print(f"[SportsEngine] 🔄 [UnusedRegularRescue] Taze sporcu karesi atandı: {chosen_photo.name} (cut_{cut_i:03d})")
+                break
+
+        # 5. Kurtarma Kuralı 2: Küratörlü b-roll havuzundaki tüm alt kategoriler (sports_science, court_action, shot_clocks)
+        if chosen_photo is None and curated_sports_dir.exists():
+            broll_candidates = sorted([
+                p for p in (curated_sports_dir / "b_roll").glob("**/*.jpg")
+                if p.name not in used_timeline_photo_names
+            ])
+            for candidate_p in broll_candidates:
+                cand_dh = _compute_dhash(candidate_p)
+                if cand_dh and any(_hamming_dist(cand_dh, pdh) <= 5 for pdh in placed_cut_dhashes):
+                    continue
+                target_p = photo_pool_dir / f"broll_{candidate_p.name}"
+                if not target_p.exists():
+                    format_sports_image(str(candidate_p), str(target_p), W, H)
+                if target_p.exists() and target_p.name not in used_timeline_photo_names:
+                    chosen_photo = target_p
+                    print(f"[SportsEngine] 🔄 [BrollWhitelist] Taze saha/bilim b-roll karesi yedeklendi: {chosen_photo.name} (cut_{cut_i:03d})")
+                    break
+
+        # 6. SIFIR DÖNGÜ KİLİDİ (ZERO LOOP INVARIANT)
+        # Asla ve asla daha önce kullanılmış bir görseli tekrar seçme! Modulo fallback YASAKLANMIŞTIR.
+        if chosen_photo is None or chosen_photo.name in used_timeline_photo_names:
+            emergency_candidates = [
+                p for p in photo_pool_dir.glob("*.jpg")
+                if p.name not in used_timeline_photo_names
+            ]
+            if emergency_candidates:
+                chosen_photo = emergency_candidates[0]
+                print(f"[SportsEngine] 🚨 [EmergencyRescue] Acil durum taze görseli atandı: {chosen_photo.name} (cut_{cut_i:03d})")
             else:
-                chosen_photo = regular_photos[(cut_i * 7) % len(regular_photos)]
-            print(f"[SportsEngine] 🔄 [UniquePick] Onaylı sporcu karesi atandı: {chosen_photo.name} (cut_{cut_i:03d})")
+                raise RuntimeError(
+                    f"[SportsEngine] 🚨 KRİTİK SIFIR DÖNGÜ HATASI: cut_{cut_i:03d} ({actual_cut_len:.2f}s) için "
+                    f"benzersiz görsel bulunamadı! Toplam kullanılan tekil görsel: {len(used_timeline_photo_names)}, "
+                    f"Gereken kesme: {len(semantic_beats)}"
+                )
 
         if chosen_photo is not None:
             used_timeline_photo_names.add(chosen_photo.name)
@@ -1938,13 +1966,24 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
                         if b["start"] <= bad_ts <= b["end"]:
                             rep_cand = None
                             for cand in regular_photos:
+                                if cand.name in used_timeline_photo_names:
+                                    continue
                                 cand_dh = _compute_dhash(cand)
-                                if cand_dh and cand_dh not in placed_cut_dhashes:
+                                if cand_dh and not any(_hamming_dist(cand_dh, pdh) <= 5 for pdh in placed_cut_dhashes):
                                     rep_cand = cand
                                     placed_cut_dhashes.append(cand_dh)
+                                    used_timeline_photo_names.add(cand.name)
                                     break
-                            if not rep_cand and regular_photos:
-                                rep_cand = regular_photos[b_idx % len(regular_photos)]
+                            if not rep_cand and curated_sports_dir.exists():
+                                for cand in sorted((curated_sports_dir / "b_roll").glob("**/*.jpg")):
+                                    if cand.name in used_timeline_photo_names:
+                                        continue
+                                    cand_dh = _compute_dhash(cand)
+                                    if cand_dh and not any(_hamming_dist(cand_dh, pdh) <= 5 for pdh in placed_cut_dhashes):
+                                        rep_cand = cand
+                                        placed_cut_dhashes.append(cand_dh)
+                                        used_timeline_photo_names.add(cand.name)
+                                        break
                             
                             if rep_cand:
                                 cut_clip = cuts_dir / f"cut_{b_idx:03d}.mp4"
