@@ -174,6 +174,7 @@ def extract_video_narration_and_context(video_folder: Path, channel_id: str = ""
         channel_info.get("topic_category") or 
         ("reddit_stories" if "reddit" in str(ch_id).lower() else 
          "whatsapp_stories" if ("yazan" in str(ch_id).lower() or "wa" in str(ch_id).lower()) else 
+         "basketball_analysis" if any(b in str(ch_id).lower() for b in ["basket", "nba"]) else
          "general")
     )
     language = (
@@ -408,6 +409,28 @@ def generate_ai_metadata(context: Dict[str, Any]) -> Dict[str, Any]:
                 "- Etiketler (tags): 12-16 adet diyalog ve mizah etiketi (konuşma, diyalog, seslendirme, dublaj, türkçe dublaj, whatsapp, komik, mizah, mesaj hikayeleri, eğlenceli sohbet). 'shorts', 'keşfet', 'viral' KULLANMA.\n"
                 "- Pinned Comment: 'Bu mesajı arkadaşına gönderseler ne derdin? 😂👇'"
             )
+    elif any(k in category.lower() for k in ["basketball", "thebasketballshows", "nba", "sports"]):
+        if not is_tr:
+            category_instructions = (
+                f"Category: NBA Basketball & Sports Science Analysis (The Basketball Shows).\n"
+                f"Target Language: {language.upper()} (MUST BE 100% IN {language.upper()}).\n"
+                "- Title: Provocative, debate-inducing, high-CTR NBA title (< 75 characters, no #Shorts) + 1 basketball emoji (🏀 or 🔥).\n"
+                "- Description:\n"
+                "  Paragraph 1 (Organic SEO): Hook exploring the physiological, biomechanical, or historical debate in the video.\n"
+                "  Paragraph 2 (Debate CTA): Direct call-to-action asking viewers to vote or take sides in the comments.\n"
+                "  Paragraph 3: 'Subscribe for daily deep-dive NBA breakdowns and sports science secrets! 🔔'\n"
+                "  Paragraph 4: Exactly 5-7 specific NBA hashtags (e.g. #NBA #Basketball #NBALegends #SportsScience #NBABreakdown #ClutchMoments) — NEVER USE #Shorts or #Viral.\n"
+                "- Tags: 14-18 specific NBA and player search tags (player names, team names, signature moves, year, sports science terms). NO generic tags.\n"
+                "- Pinned Comment: A highly provocative, binary or multiple-choice debate question that forces viewers to comment (e.g. 'Could anyone in today\\'s NBA ever top this? Luka, Steph, or Giannis? Vote below! 👇🏀' or 'Was this move pure skill or pure luck? Drop your verdict below! 👇🏀')."
+            )
+        else:
+            category_instructions = (
+                "Kategori: NBA Basketbol ve Spor Bilimi Analizi.\n"
+                "- Başlık: Yüksek CTR, tartışma başlatan NBA başlığı + 🏀 emojisi.\n"
+                "- Açıklama: Doğal SEO kancası, izleyiciyi ikiye bölecek tartışma sorusu ve özel NBA hashtagleri.\n"
+                "- Etiketler: 14-18 adet spesifik NBA oyuncu ve takım etiketi.\n"
+                "- Pinned Comment: İzleyicileri ikiye bölecek, anında yorum yazdıracak tartışma sorusu (Örn: 'Peki sizce günümüz kurallarıyla bu rekora en çok kim yaklaşabilir? Luka mı, Steph mi? Yorumlarda tartışalım! 👇🏀')."
+            )
     else:
         category_instructions = (
             f"Category: {category}.\n"
@@ -604,6 +627,30 @@ def generate_ai_metadata(context: Dict[str, Any]) -> Dict[str, Any]:
                 "türkçe dublaj", "whatsapp", "komik", "komedi", "mesaj hikayeleri", "eğlenceli sohbet"
             ]
             pinned = "Bu konuşmayı yaşayan arkadaşına gönder 😂👇"
+    elif any(k in category.lower() for k in ["basketball", "thebasketballshows", "nba", "sports"]):
+        default_title = f"{clean_title} 🏀" if not any(c in clean_title for c in "!?🏀🔥") else clean_title
+        if "fisher" in clean_title.lower() or "0.4" in clean_title.lower():
+            pinned = "🏀 DEBATE: If Derek Fisher's 0.4 catch-and-shoot happened in tonight's NBA with high-speed 4K cameras, does it count or get waved off? And who in today's league has the fastest clutch release? Vote below! 👇"
+        elif "harden" in clean_title.lower() or "step-back" in clean_title.lower() or "deceleration" in clean_title.lower():
+            pinned = "🏀 HOT TAKE DEBATE: Is James Harden's step-back the most unguardable signature move in NBA history, or does Curry's off-ball three take the crown? Who is stopping prime Harden in isolation? Debate below! 👇"
+        elif any(w in clean_title.lower() for w in ["record", "wilt", "kobe", "81", "point"]):
+            pinned = "🏀 DEBATE: Could anyone in today's NBA ever break this historic record? Luka, Steph, or Giannis? Drop your pick below! 👇"
+        else:
+            pinned = "🏀 DEBATE TIME: Who in today's NBA could ever pull this off? Drop your hottest take below! 👇"
+
+        default_desc = (
+            f"{default_title}\n\n"
+            f"{hook_part}"
+            "Deep-dive breakdown into the mechanics, sports science, and high-pressure physics of legendary NBA moments.\n\n"
+            f"💬 PINNED COMMENT DEBATE: {pinned}\n\n"
+            "Subscribe and hit the bell for daily authentic NBA breakdowns and sports science secrets! 🔔\n\n"
+            "#NBA #Basketball #NBALegends #SportsScience #NBABreakdown #ClutchMoments #TheBasketballShows"
+        )
+        default_tags = [
+            "nba", "basketball", "nba analysis", "nba highlights", "sports science",
+            "nba breakdown", "clutch moments", "basketball science", "the basketball show",
+            "nba debate", "greatest nba moments"
+        ]
     else:
         loc_desc, loc_tags = get_localized_metadata(clean_title, language=language, category=category, hook_summary=content_text[:180])
         default_title = clean_title

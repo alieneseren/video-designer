@@ -157,11 +157,14 @@ async fn run_job(job_file: &Path, force_rebuild: bool) -> Result<()> {
 
     for i in 0..num_cuts {
         let cut_file = cuts_dir.join(format!("cut_{:03}.mp4", i));
-        let photo_idx = i % valid_photos.len().max(1);
         let pz = pz_types[i % pz_types.len()];
 
-        if let Some(photo) = valid_photos.get(photo_idx) {
+        if let Some(photo) = valid_photos.get(i) {
             renderer.render_image_cut(photo, &cut_file, cut_duration, pz).await?;
+            cut_files.push(cut_file);
+        } else if let Some(first_photo) = valid_photos.first() {
+            // Havuz yetersiz kaldığında asla mod-döngü yapma; tekil güvenli kare kullan
+            renderer.render_image_cut(first_photo, &cut_file, cut_duration, pz).await?;
             cut_files.push(cut_file);
         }
     }

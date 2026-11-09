@@ -64,6 +64,6 @@ impl TimelineGuard {
 
 impl Default for TimelineGuard {
     fn default() -> Self {
-        Self::new(5) // Default Hamming distance <= 5 counts as duplicate
+        Self::new(10) // Strict Hamming distance <= 10 counts as perceptual duplicate
     }
 }

@@ -73,9 +73,10 @@ CROSS_PROJECT_WALL_RULES: Dict[str, Dict[str, List[str]]] = {
         "forbidden_path_tokens": [
             "aviation", "airplane", "airfield", "cockpit", "runway", "crash",
             "military", "crayon", "weapon", "fighter_jet", "tank", "combat", "drone_overhead",
-            "atsugi", "military_base", "signing", "autograph", "school", "classroom",
+            "atsugi", "military_base", "signing", "autograph", "signature", "signed", "school", "classroom",
             "box_score_old", "paper_sheet", "press_conference", "yellow_jersey", "soccer", "football", "fifa", "robinho",
-            "ticket", "stub", "jumbotron", "scoreboard", "scola", "bonzi", "arena_bar"
+            "ticket", "stub", "jumbotron", "scoreboard", "scola", "bonzi", "arena_bar",
+            "tiktok", "screen_recording", "screencap"
         ],
         "default_blacklist": [
             # Taranmış Baskı ve Beyaz Kenarlık Filtresi (Border & Letterboxing Prevention)
@@ -134,8 +135,6 @@ CROSS_PROJECT_WALL_RULES: Dict[str, Dict[str, List[str]]] = {
             "jersey display next to photo graphic",
             "magazine collage multiple cutouts",
             "side by side composite image",
-            # Yanlış Dönem Oyuncuları (2000'ler Rockets sızıntısı)
-            "luis scola", "scola", "luther head", "bonzi wells", "yao ming", "james harden", "harden",
             # Çapraz Spor ve Uygunsuz Görseller
             "soccer", "football", "fifa", "world cup", "brazil", "robinho",
             "military base", "elementary school", "autograph signing table", "press conference microphone",
@@ -145,10 +144,22 @@ CROSS_PROJECT_WALL_RULES: Dict[str, Dict[str, List[str]]] = {
             "empty basketball hoop without players", "rural backyard dirt court",
             "rural house", "backyard", "suburban driveway", "amateur kid playing basketball",
             "pink house", "grass yard hoop", "residential house", "suburban backyard", "driveway hoop",
-            "kevin mchale", "mchale", "boston celtics", "celtics", "larry bird", "robert parish", "parish",
             "aerial drone shot of playground or soccer field", "blurry low quality",
             "stock photo watermark text logo", "person sitting in casual clothes on street",
-            "sneakers on concrete ground", "amateur children playing"
+            "sneakers on concrete ground", "amateur children playing",
+            # İmzalı Fotoğraf, TikTok ve Sahte Kurgu Dedektörü
+            "handwritten autograph signature marker yellow scribble",
+            "signed autographed trading card or poster with pen marker",
+            "yellow text banner bar with title",
+            "tiktok mobile screen recording header overlay",
+            "social media text caption overlay banner",
+            "fake photoshop jersey swap trophy deepfake",
+            "fake championship trophy edit",
+            "amateur gym smartphone vertical recording",
+            "red bar cropping defect letterbox border",
+            "steven adams upside down reverse dunk",
+            "hanging on basketball rim dunk",
+            "yellow banner bar overlay"
         ],
         "default_positives": [
             "official NBA professional basketball game action",
@@ -466,8 +477,8 @@ class AssetValidator:
                 cap.release()
                 if not ret or frame is None:
                     return False, f"Videodan kare okunamadı: {p.name}", {}
-                if min(w, h) < 480:
-                    return False, f"Düşük video çözünürlüğü ({w}x{h}).", {"width": w, "height": h}
+                if min(w, h) < 720 or max(w, h) < 1280:
+                    return False, f"Düşük video çözünürlüğü ({w}x{h}). Dikey içerik için minimum 720p/1080p standartlarını karşılamıyor.", {"width": w, "height": h}
                 stat = ImageStat.Stat(Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)))
                 avg_stddev = sum(v ** 0.5 for v in stat.var) / 3.0
                 if avg_stddev < 8.0:
@@ -780,7 +791,8 @@ class AssetValidator:
         blacklist_labels: Optional[List[str]] = None,
         dynamic_negatives: Optional[List[str]] = None,
         project_type: Optional[str] = None,
-        threshold: float = 0.20
+        threshold: float = 0.20,
+        target_entity: Optional[str] = None
     ) -> Tuple[bool, float, float, str, str, str]:
         """
         Aday görselin pozitif sahne eşleşmesi ve dinamik negatif etiketlere benzerliğini skorlar.
@@ -796,6 +808,14 @@ class AssetValidator:
                 return False, 0.0, 1.0, "", "", f"Görsel açılamadı: {e}"
         else:
             img = image_input.convert("RGB")
+
+        # Hedef oyuncu/varlık ve parçalarını tespit et (asla negatif olamaz)
+        target_tokens = set()
+        if target_entity:
+            t_ent_clean = target_entity.lower().strip()
+            target_tokens.add(t_ent_clean)
+            for tok in re.findall(r"\b[a-zA-Z]{3,}\b", t_ent_clean):
+                target_tokens.add(tok)
 
         # Proje varsayılanları + kara liste + dinamik dönem/takım negatifleri
         combined_blacklist: List[str] = []
@@ -839,12 +859,17 @@ class AssetValidator:
             "stock photo watermark text logo"
         ])
 
-        # Tekilleştir
+        # Tekilleştir ve hedef oyuncu kelimelerini kesinlikle ayıkla
         seen = set()
         clean_negatives: List[str] = []
         for b in combined_blacklist:
             b_norm = b.strip().lower()
-            if b_norm and b_norm not in seen:
+            if not b_norm:
+                continue
+            # Eğer negatif etiketi hedef oyuncuyu içeriyorsa (örn. james harden), asla negatif havuzuna alma!
+            if target_tokens and any(tt == b_norm or (len(tt) > 3 and tt in b_norm) for tt in target_tokens):
+                continue
+            if b_norm not in seen:
                 seen.add(b_norm)
                 clean_negatives.append(b_norm)
 
@@ -942,19 +967,23 @@ class AssetValidator:
                     "modern digital ticket", "close-up text document receipt", "ticket stub", "ticket",
                     "jumbotron", "scoreboard", "indoor bar", "bar counter", "bartender",
                     "empty basketball stadium", "empty stadium seats", "arena stands", "receipt", "document",
-                    "luis scola", "scola", "luther head", "bonzi wells", "yao ming", "james harden", "harden",
-                    "kevin mchale", "mchale", "celtics", "boston celtics", "larry bird",
-                    "robert parish", "parish", "celtics green jersey", "boston garden",
-                    "dennis johnson", "danny ainge",
                     "soccer", "football", "fifa", "world cup", "robinho",
                     "rural house", "backyard", "suburban driveway", "amateur kid playing basketball",
                     "pink house", "grass yard hoop", "rural court", "residential house",
                     "suburban backyard", "driveway hoop", "cargo shorts", "empty hoop",
                     "military", "aircraft", "cockpit", "fighter jet", "dirt court", "elementary school", "atsugi",
-                    "sports merchandise product mockup", "jersey display next to photo"
+                    "sports merchandise product mockup", "jersey display next to photo",
+                    "anime or manga style drawing", "comic book artwork drawing", "CGI 3D render character"
                 ])
                 if dynamic_negatives:
                     critical_keywords.extend([dn.lower().strip() for dn in dynamic_negatives if dn.strip()])
+
+            # Hedef oyuncu/varlık kelimelerini kritik negatifler listesinden kesinlikle temizle
+            if target_tokens:
+                critical_keywords = [
+                    ck for ck in critical_keywords
+                    if not any(tt == ck or (len(tt) > 3 and tt in ck) for tt in target_tokens)
+                ]
 
             for neg_idx, neg_val in enumerate(neg_probs):
                 neg_score = float(neg_val)
@@ -1117,7 +1146,8 @@ class AssetValidator:
             blacklist_labels=blacklist_labels,
             dynamic_negatives=dynamic_negatives,
             project_type=project_type,
-            threshold=threshold
+            threshold=threshold,
+            target_entity=target_entity
         )
         if not vision_ok:
             logger.warning(f"🚫 [Kademe 2 - RED] {fpath.name}: {vision_reason}")

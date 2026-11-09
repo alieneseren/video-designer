@@ -183,6 +183,21 @@ class VisualDirector:
                 "domain_type": "street_food"
             }
 
+        # 5. Spor Bilimi & NBA Efsaneleri (Sports Science & NBA Legends)
+        if any(w in corpus for w in ["basketball", "nba", "derek fisher", "james harden", "step-back", "buzzer beater", "shot clock", "thebasketballshows", "sports_science"]):
+            return {
+                "category_badge": "SPORTS SCIENCE",
+                "badge_display_window": {"start_sec": 0.0, "end_sec": 4.0},
+                "global_domain_prefix": "authentic NBA basketball action court photography",
+                "global_negative_keywords": (
+                    f"{UNIVERSAL_NEGATIVES}, anime, manga, cartoon, comic, illustration, drawing, animated, "
+                    "boalls, tiktok, emoji, watermark, frame, mockup, poster, phone_recording, 240p, 480p, "
+                    "trading_card, cardboard, rookie_of_the_year, fleer, nbahoops, collectible, "
+                    "ncaa, college_basketball, college, kansas, jayhawks, march_madness, soccer, nfl, baseball"
+                ),
+                "domain_type": "sports_science"
+            }
+
         # Varsayılan
         return {
             "category_badge": category.upper().replace("_", " ") if category else "SPECIAL REPORT",

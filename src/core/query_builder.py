@@ -478,6 +478,33 @@ PLAYER_CAREER_MAP: Dict[str, Dict[str, Any]] = {
         "rival_competitors": ["Golden State Warriors"],
         "college": "UCLA Bruins",
         "signature_moves": ["coast to coast slam", "triple double", "pull up jumper"]
+    },
+    "Derek Fisher": {
+        "eras": [
+            {"start": 1996, "end": 2004, "primary_team": "Los Angeles Lakers", "peak_year": 2004},
+            {"start": 2004, "end": 2006, "primary_team": "Golden State Warriors", "peak_year": 2005},
+            {"start": 2006, "end": 2007, "primary_team": "Utah Jazz", "peak_year": 2007},
+            {"start": 2007, "end": 2012, "primary_team": "Los Angeles Lakers", "peak_year": 2009}
+        ],
+        "default_year": 2004,
+        "other_teams": ["Utah Jazz", "Golden State Warriors", "Oklahoma City Thunder", "Dallas Mavericks"],
+        "rival_competitors": ["San Antonio Spurs", "Detroit Pistons", "Boston Celtics"],
+        "college": "Little Rock Trojans",
+        "signature_moves": ["0.4 shot", "buzzer beater", "catch and shoot", "left hand release", "inbound pass turn", "clutch shot"]
+    },
+    "James Harden": {
+        "eras": [
+            {"start": 2009, "end": 2012, "primary_team": "Oklahoma City Thunder", "peak_year": 2012},
+            {"start": 2012, "end": 2021, "primary_team": "Houston Rockets", "peak_year": 2018},
+            {"start": 2021, "end": 2022, "primary_team": "Brooklyn Nets", "peak_year": 2021},
+            {"start": 2022, "end": 2023, "primary_team": "Philadelphia 76ers", "peak_year": 2023},
+            {"start": 2023, "end": 2030, "primary_team": "Los Angeles Clippers", "peak_year": 2024}
+        ],
+        "default_year": 2018,
+        "other_teams": ["Brooklyn Nets", "Philadelphia 76ers", "Oklahoma City Thunder", "Los Angeles Clippers"],
+        "rival_competitors": ["Golden State Warriors", "Utah Jazz", "San Antonio Spurs"],
+        "college": "Arizona State Sun Devils",
+        "signature_moves": ["step back", "deceleration", "eurostep", "crossover", "braking force", "isolation"]
     }
 }
 
@@ -498,7 +525,7 @@ CROSS_SPORT_AND_OFF_COURT_NEGATIVES: List[str] = [
     "crowd sitting in arena stands", "modern digital ticket",
     "close-up text document receipt", "receipt",
     # İstenmeyen Diğer Dönem Oyuncuları (2000'ler Rockets sızıntısı)
-    "luis scola", "scola", "luther head", "bonzi wells", "yao ming", "james harden", "harden",
+    "luis scola", "scola", "luther head", "bonzi wells", "yao ming",
     # Saha Dışı / Uygunsuz Görseller, Askeri Üs ve İmza Masaları
     "military base", "japanese atsugi base", "atsugi military base",
     "soldiers playing basketball", "elementary school", "elementary school children",
@@ -511,13 +538,23 @@ CROSS_SPORT_AND_OFF_COURT_NEGATIVES: List[str] = [
     "cargo shorts", "empty hoop", "empty basketball hoop without players",
     "backyard rusty rim", "holding soccer ball", "streetwear fashion photoshoot",
     "glasses and sunglasses", "suit and necktie", "blurry low quality picture",
-    "stock watermark text logo", "box score paper sheet", "old paper scoresheet"
+    "stock watermark text logo", "box score paper sheet", "old paper scoresheet",
+    # Görsel Hijyen: Anime / Çizgi / Sosyal Medya / Koleksiyon Kartı Sızıntıları
+    "anime", "manga", "cartoon", "comic", "illustration", "drawing", "animated",
+    "chibi", "japanese anime", "ai generated anime", "digital art character", "boalls",
+    "tiktok", "tiktok overlay", "emoji overlay", "phone recording", "screen recording",
+    "trading card", "cardboard card", "nba hoops card", "fleer card", "topps card",
+    "collector card", "rookie card", "physical card", "cardstock", "rookie of the year",
+    "240p", "480p", "low resolution", "blurry phone", "phone screenshot",
+    "watermark logo overlay", "text overlay social media", "meme template",
+    "frame", "mockup", "poster on wall", "framed poster", "wall art mockup"
 ]
 
 # Arama Motoru Negatif Hariç Tutma Filtresi (Negative Query Exclusions)
 SEARCH_NEGATIVE_EXCLUSIONS: str = (
     '-ticket -stub -"ticket stub" -jumbotron -scoreboard -concession -bar -arena '
-    '-Scola -Head -"Bonzi Wells" -"Yao Ming" -Harden'
+    '-Scola -Head -"Bonzi Wells" -"Yao Ming" -anime -manga -cartoon -comic -tiktok '
+    '-emoji -trading_card -cardboard'
 )
 
 # Geriye dönük uyumluluk takma adı
@@ -534,9 +571,13 @@ STOP_WORDS: Set[str] = {
     "both", "each", "few", "more", "most", "other", "some", "such", "no", "nor",
     "not", "only", "own", "same", "so", "than", "too", "very", "can", "will",
     "just", "should", "now", "it", "its", "his", "her", "their", "my", "your",
-    # Çapraz spor ve soyut sızıntıları önleme
+    # Çapraz spor, soyut terimler ve mecaz (idiom) sızıntılarını önleme
     "soccer", "football", "fifa", "world", "cup", "brazil", "robinho",
-    "military", "base", "school", "signing", "autograph", "table"
+    "military", "base", "school", "signing", "autograph", "table",
+    "upside", "down", "upside down", "completely", "discovered", "something", "secret",
+    "behind", "reveals", "revealed", "unprecedented", "legendary", "miracle", "biological",
+    "threshold", "extreme", "physics", "unmatched", "generated", "difference", "truth",
+    "history", "moment", "incredible", "impossible", "insane", "crazy", "dime", "fire", "cold"
 }
 
 
@@ -584,9 +625,16 @@ class QueryBuilder:
     """
 
     ACTION_PATTERNS: List[Tuple[str, str]] = [
+        # Spor Bilimi / Nöroloji / Beyin / Optik Sinir / Biyomekanik
+        (r"\b(optic|retina|pupil|visual\s+cortex|neuron|neural|brain|cortex|neurobiology|motor\s+cortex|reaction\s+time|stimulus|synapse|synaptic|biological\s+threshold)\b", "human brain neural transmission impulse visual cortex 3d scientific animation"),
+        (r"\b(trent\s+tucker|shot\s+clock|tenths\s+of\s+a\s+second|buzzer\s+beater|0\.4|final\s+tenths|clock\s+rules?)\b", "NBA vintage 1990 shot clock tenths of a second digital buzzer beater"),
+        (r"\b(eccentric|braking\s+force|braking|kinematic|biomechanic|sensors?|force\s+plate|quadriceps|quad|deceleration|decelerate|stopping\s+power)\b", "athlete motion capture kinematic body sensors sports science laboratory slow motion"),
+        (r"\b(friction|sudden\s+stop|sneakers?\s+court|hardwood\s+stop)\b", "basketball player sneakers sudden stop court friction slow motion close up"),
+        (r"\b(step-back|step\s+back|stepback|isolation|separation)\b", "step back three pointer isolation"),
+        (r"\b(catch\s+and\s+shoot|inbound\s+pass|inbounds|turnaround\s+jumper)\b", "catch and shoot buzzer beater"),
         (r"\b(dream\s+shake|shake|shimmy)\b", "dream shake baseline"),
         (r"\b(pivot|footwork|center\s+of\s+gravity|balance)\b", "pivot footwork post move"),
-        (r"\b(reverse\s+layup|layup|reverse)\b", "reverse layup rim"),
+        (r"\b(reverse\s+layup|driving\s+layup|finger\s+roll|layup)\b", "layup rim"),
         (r"\b(optical\s+illusion|high\s+art|fake|half-spin)\b", "post fake shot move"),
         (r"\b(crossover|cross-over|crossed\s+over|ankles?)\b", "crossover"),
         (r"\b(slam\s+dunk|dunking|dunk|tomahawk|windmill)\b", "slam dunk"),
@@ -671,7 +719,17 @@ class QueryBuilder:
             "nowitzki": "Dirk Nowitzki",
             "david robinson": "David Robinson",
             "the admiral": "David Robinson",
-            "robinson": "David Robinson"
+            "robinson": "David Robinson",
+            "derek fisher": "Derek Fisher",
+            "fisher": "Derek Fisher",
+            "d-fish": "Derek Fisher",
+            "james harden": "James Harden",
+            "harden": "James Harden",
+            "the beard": "James Harden",
+            "shai gilgeous-alexander": "Shai Gilgeous-Alexander",
+            "shai": "Shai Gilgeous-Alexander",
+            "jalen brunson": "Jalen Brunson",
+            "brunson": "Jalen Brunson"
         }
 
         # Skor tablosu
@@ -693,8 +751,28 @@ class QueryBuilder:
             return best_entity
 
         # Büyük harfli isim kalıbı (örn: Hakeem Olajuwon)
+        # Sadece gerçek isim olabilecek çiftleri kabul et, soyut kavramları kara listeye al
+        NON_PLAYER_PHRASES = {
+            "second miracle", "human biology", "trent tucker", "atomic limit", "shot clock",
+            "buzzer beater", "fast break", "playoff game", "game winner", "triple double",
+            "sports science", "nba analysis", "western conference", "eastern conference",
+            "regular season", "nba finals", "hall of fame", "court action", "red led",
+            "left hand", "right hand", "reaction time", "optic nerves", "motor cortex",
+            "scientific reality", "deceleration secret", "braking force", "muscle braking"
+        }
+        VERIFIED_NAME_BLACKLIST = {
+            "defied", "human", "biology", "second", "miracle", "when", "the", "nba",
+            "atomic", "limit", "secret", "behind", "step", "back", "clock", "shot",
+            "reality", "neural", "nerves", "optic", "motor", "cortex", "science",
+            "trent", "tucker"
+        }
         proper_names = re.findall(r"\b([A-Z][a-z]+ [A-Z][a-z]+)\b", text)
         for pn in proper_names:
+            words = pn.lower().split()
+            if any(w in VERIFIED_NAME_BLACKLIST for w in words):
+                continue
+            if pn.lower() in NON_PLAYER_PHRASES:
+                continue
             if not any(t in pn.lower() for t in ["the basketball", "golden state", "san antonio", "new york", "los angeles", "houston rockets", "chicago bulls", "boston celtics"]):
                 return pn
 
@@ -707,6 +785,22 @@ class QueryBuilder:
     def extract_year(cls, text: str, entity: str = "") -> Optional[int]:
         """Metinden yılı veya oyuncunun zirve dönemini çıkarır."""
         years = re.findall(r"\b(19\d{2}|20\d{2})\b", text)
+        
+        # Eğer oyuncu biliniyorsa, metindeki yıllardan oyuncunun kariyeriyle eşleşeni seç
+        if entity in PLAYER_CAREER_MAP:
+            p_eras = PLAYER_CAREER_MAP[entity].get("eras", [])
+            valid_career_years = []
+            for y_str in years:
+                y_val = int(y_str)
+                if any(era["start"] <= y_val <= era["end"] for era in p_eras):
+                    valid_career_years.append(y_val)
+            if valid_career_years:
+                return max(set(valid_career_years), key=valid_career_years.count)
+            # Eğer metindeki yıllar oyuncunun kariyerine uymuyorsa (örn: 1990 kuralı), oyuncunun varsayılan peak yılını dön!
+            default_y = PLAYER_CAREER_MAP[entity].get("default_year")
+            if default_y:
+                return default_y
+
         if years:
             return int(years[0])
 
@@ -731,21 +825,32 @@ class QueryBuilder:
         """Metinden veya oyuncunun o dönemdeki takımını tespit eder."""
         t_lower = text.lower()
 
+        # 1. Eğer oyuncu kayıtlıysa, oyuncunun kendi takımı rakip takımlardan daima önceliklidir
+        if entity in PLAYER_CAREER_MAP:
+            p_data = PLAYER_CAREER_MAP[entity]
+            player_teams = [era["primary_team"] for era in p_data.get("eras", [])]
+            for pt in player_teams:
+                if pt.lower() in t_lower:
+                    return pt
+                t_aliases = NBA_TEAMS.get(pt, {}).get("aliases", [])
+                for alias in t_aliases:
+                    if re.search(rf"\b{re.escape(alias)}\b", t_lower):
+                        return pt
+            target_year = year or p_data.get("default_year")
+            if target_year:
+                for era in p_data.get("eras", []):
+                    if era["start"] <= target_year <= era["end"]:
+                        return era["primary_team"]
+            if p_data.get("eras"):
+                return p_data["eras"][0]["primary_team"]
+
+        # 2. Genel metin araması (rakip veya genel takım)
         for team_full, t_info in NBA_TEAMS.items():
             if team_full.lower() in t_lower:
                 return team_full
             for alias in t_info["aliases"]:
                 if re.search(rf"\b{re.escape(alias)}\b", t_lower):
                     return team_full
-
-        if entity in PLAYER_CAREER_MAP:
-            p_data = PLAYER_CAREER_MAP[entity]
-            if year:
-                for era in p_data["eras"]:
-                    if era["start"] <= year <= era["end"]:
-                        return era["primary_team"]
-            if p_data["eras"]:
-                return p_data["eras"][0]["primary_team"]
 
         return None
 
@@ -786,11 +891,18 @@ class QueryBuilder:
         yr = year or (cls.extract_year(str(script_or_context)) if script_or_context else None)
         yr_str = f"{yr} " if yr else ""
 
-        # Takım bilgilerini bul
+        # Takım bilgilerini bul (eras[0] yerine peak/default_year dönemine öncelik ver)
         team = None
         if ent in PLAYER_CAREER_MAP:
             p_data = PLAYER_CAREER_MAP[ent]
-            team = p_data.get("eras", [{}])[0].get("primary_team")
+            target_year = yr or p_data.get("default_year")
+            if target_year:
+                for era in p_data.get("eras", []):
+                    if era.get("start", 0) <= target_year <= era.get("end", 9999):
+                        team = era.get("primary_team")
+                        break
+            if not team and p_data.get("eras"):
+                team = p_data["eras"][0].get("primary_team")
         team = team or ""
 
         # Rakip oyuncu ve takım bilgisi (Yalnızca metinde gerçek bir eşleşme varsa ekle)
@@ -812,14 +924,37 @@ class QueryBuilder:
         queries.append(f'"{ent}" {yr_str}playoffs action shot'.strip())
         queries.append(f'"{ent}" {yr_str}NBA game action photo'.strip())
         if team:
-            queries.append(f'"{ent}" {team} {yr_str}championship action shot'.strip())
+            queries.append(f'"{ent}" {team} {yr_str}game action shot'.strip())
             queries.append(f'"{ent}" {team} post up footwork action'.strip())
-            queries.append(f'"{ent}" slam dunk rim {team}'.strip())
             queries.append(f'"{ent}" {team} jersey game highlights'.strip())
+            queries.append(f'"{ent}" {team} court action photo'.strip())
         else:
-            queries.append(f'"{ent}" slam dunk rim action'.strip())
             queries.append(f'"{ent}" clutch playoff shot'.strip())
             queries.append(f'"{ent}" authentic NBA court photo'.strip())
+
+        if "derek fisher" in ent.lower() or "fisher" in ent.lower():
+            queries.append(f'"{ent}" Los Angeles Lakers 2004 0.4 shot San Antonio Spurs Game 5')
+            queries.append(f'"{ent}" buzzer beater Lakers vs Spurs 2004 Western Conference Semifinals')
+            queries.append(f'"{ent}" shooting over Manu Ginobili 2004 Game 5')
+            queries.append(f'"{ent}" receiving inbound pass mid air catch turn 2004')
+            queries.append(f'"{ent}" Gary Payton inbounds pass sideline 2004 Game 5')
+            queries.append(f'"Tim Duncan" stunned disbelief 2004 Game 5 Lakers Spurs')
+            queries.append(f'"{ent}" running off court celebration 2004 Game 5')
+            queries.append(f'"{ent}" Los Angeles Lakers jersey #2 2004 action')
+            queries.append('human brain neural transmission visual cortex 3d medical animation 4k')
+            queries.append('NBA vintage 1990 shot clock tenths of a second digital buzzer beater')
+            queries.append('macro eye pupil focus retina light optic nerve scientific animation')
+
+        if "james harden" in ent.lower() or "harden" in ent.lower():
+            queries.append(f'"{ent}" Houston Rockets step back three pointer')
+            queries.append(f'"{ent}" deceleration sudden stop sneakers court friction 2018')
+            queries.append(f'"{ent}" Houston Rockets isolation stepback jumper 2018')
+            queries.append(f'"{ent}" crossover drive slow motion broadcast 2018')
+            queries.append(f'"{ent}" Houston Rockets MVP 2018 game action')
+            queries.append(f'"{ent}" step back separation defender off balance')
+            queries.append('athlete running motion capture kinematic body sensors sports science 4k')
+            queries.append('sports biomechanics computer graph data velocity curve visualization 4k')
+            queries.append('basketball player sneakers sudden stop court friction slow motion close up')
 
         if "wilt" in ent.lower() or "chamberlain" in ent.lower():
             queries.append(f'"{ent}" dunk Philadelphia Warriors 1962')
@@ -839,14 +974,13 @@ class QueryBuilder:
             queries.append(f'"{ent}" Miami Heat championship trophy')
             queries.append(f'"{ent}" Cleveland Cavaliers 2016 NBA finals')
 
-        queries.append(f'"{ent}" NBA basketball championship finals')
-        queries.append(f'"{ent}" clutch game winner shot')
-        queries.append(f'"{ent}" defense block rim contest')
-        queries.append(f'"{ent}" championship trophy celebration')
-        queries.append(f'"{ent}" fastbreak slam dunk transition')
-        queries.append(f'"{ent}" chase down block defense')
+        if ent in PLAYER_CAREER_MAP:
+            for sm in PLAYER_CAREER_MAP[ent].get("signature_moves", []):
+                queries.append(f'"{ent}" {team} {sm} action'.strip())
+
         queries.append(f'"{ent}" pull up jumper mid-range game')
-        queries.append(f'"{ent}" driving layup contact finish')
+        queries.append(f'"{ent}" clutch game winner shot')
+        queries.append(f'"{ent}" defense contest court action')
 
         # 2. Rakip oyuncu bağlamda varsa karşılaştırmalı sorguları ekle
         if opp:
@@ -924,9 +1058,45 @@ class QueryBuilder:
                 negatives.add("college basketball")
                 negatives.add("ncaa tournament")
 
+        # Özel Karakter Negatif Kalkanı (Audit Hatalarını Kalıcı Olarak Engelleyen Kural Seti)
+        if entity:
+            ent_l = entity.lower()
+            if "derek fisher" in ent_l or "fisher" in ent_l:
+                negatives.update([
+                    "lebron", "lebron james", "23", "kobe 24", "2010", "2009",
+                    "dwight howard", "magic", "orlando", "orlando magic", "pinstripes",
+                    "shai", "shai gilgeous-alexander", "okc", "thunder",
+                    "autograph", "signature", "marker", "yellow scribble", "signed",
+                    "tiktok", "chasedown", "chase down block", "block", "chasedown block",
+                    "emoji", "amateur", "gym", "cellphone", "text overlay", "red bar",
+                    "letterbox", "clippers", "suns", "sam cassell", "corey maggette",
+                    "trading card", "cardboard card", "cardboard", "collectible",
+                    "reverse dunk", "hanging on rim", "slam dunk contest",
+                    "billups", "chauncey billups", "pistons", "detroit", "palace auburn hills",
+                    "celtics", "boston celtics", "rondo", "green jersey", "finals 2010"
+                ])
+            elif "james harden" in ent_l or "harden" in ent_l:
+                negatives.update([
+                    "steven adams", "trophy", "championship trophy", "larry obrien",
+                    "larry o'brien", "cavs", "cleveland", "cavaliers", "donovan mitchell",
+                    "jersey swap", "deepfake", "fake", "montage", "yellow box",
+                    "harden driving layup", "overlay", "tiktok", "screen recording",
+                    "scoreboard", "watermark", "dunk", "hanging on rim", "rim hang",
+                    "upside down", "reverse dunk", "slam dunk contest", "tomahawk",
+                    "76ers", "philadelphia", "sixers", "chris paul", "celebration jump",
+                    "lebron", "lebron james", "yellow headband", "mouse cursor", "pointer"
+                ])
+
         if custom_negatives:
             for cn in custom_negatives:
                 negatives.add(cn.lower().strip())
+
+        # Invariant: Aktif karakterin kendi adı veya parçaları asla negatiflerde bulunamaz!
+        if entity:
+            negatives.discard(entity.lower().strip())
+            for word in entity.lower().split():
+                if len(word) >= 3:
+                    negatives.discard(word)
 
         return sorted(list(negatives))
 

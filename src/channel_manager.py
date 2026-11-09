@@ -10,7 +10,8 @@ from pathlib import Path
 from datetime import datetime
 
 
-DEFAULT_CHANNELS_FILE = "config/channels.json"
+_PROJ_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CHANNELS_FILE = str(_PROJ_ROOT / "config" / "channels.json")
 
 
 # Kanal başına ayarlanabilen edit alanları ve varsayılanları

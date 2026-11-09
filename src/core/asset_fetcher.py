@@ -87,13 +87,16 @@ BLACK_LISTED_TERMS = [
     "celtics", "boston", "mchale", "parish", "larry bird", "larry_bird",
     "rural", "backyard", "driveway", "cargo", "pink_house", "house", "playground",
     "drawing", "clipart", "illustration", "cartoon", "vector",
+    "anime", "manga", "comic", "boalls", "tiktok", "emoji",
+    "trading card", "cardboard", "rookie card", "fleer", "nbahoops", "collectible",
+    "mockup", "frame", "framed poster", "wall art", "ncaa", "kansas", "jayhawks",
     # Bilet, Jumbotron, Tribün ve Boş Salon / Bar Sızıntıları
     "ticket", "stub", "ticket stub", "ticket_stub", "jumbotron", "scoreboard",
     "concession", "bar", "arena bar", "arena seats", "empty arena", "crowd in stands",
     "admission", "admission ticket", "receipt", "document",
     # Yanlış Dönem Oyuncuları (2000'ler Rockets sızıntısı)
     "scola", "luis scola", "luther head", "luther_head", "bonzi wells", "bonzi_wells",
-    "yao ming", "yao_ming", "harden", "james harden"
+    "yao ming", "yao_ming"
 ]
 
 
@@ -318,10 +321,13 @@ class AssetFetcher:
                     if any(sd in u_low for sd in COMMERCIAL_STOCK_DOMAINS):
                         continue
 
-                    # 2. Bilet, salon ve yanlış dönem oyuncusu filtreleri
+                    # 2. Bilet, salon, anime, kart ve yanlış dönem oyuncusu filtreleri
                     if any(bad in title or bad in u_low for bad in [
                         "ticket", "stub", "scoreboard", "jumbotron", "concession",
-                        "scola", "bonzi wells", "luther head", "robert parish", "mchale", "watermark", "gty.im", "gty"
+                        "scola", "bonzi wells", "luther head", "robert parish", "mchale", "watermark", "gty.im", "gty",
+                        "anime", "manga", "cartoon", "comic", "boalls", "tiktok", "emoji", "trading card", "cardboard",
+                        "fleer", "nbahoops", "collectible", "mockup", "frame", "poster", "wall art", "ncaa", "kansas", "jayhawks",
+                        "rookie card", "rookie of the year"
                     ]):
                         continue
 
@@ -399,10 +405,8 @@ class AssetFetcher:
             f"{entity} {team}".strip(),
             f"{entity} NBA",
             f"{entity} basketball",
-            f"{entity} dunk",
             f"{entity} action shot",
-            "NBA basketball court game action",
-            "NBA basketball arena action shot"
+            f"{entity} court game action"
         ]
         if year:
             extra_fallbacks.append(f"{entity} {year}")
@@ -497,17 +501,11 @@ class AssetFetcher:
             tm_part = f"{team} " if team else ""
             ddg_target_queries = [
                 f'"{entity}" {yr_part}NBA game action photo'.strip(),
-                f'"{entity}" championship trophy celebration'.strip(),
-                f'"{entity}" clutch game winner playoff celebration'.strip(),
-                f'"{entity}" fastbreak slam dunk transition'.strip(),
-                f'"{entity}" chase down block defense'.strip(),
-                f'"{entity}" pull up jumper mid-range'.strip(),
+                f'"{entity}" {tm_part}game action photo'.strip(),
                 f'"{entity}" {tm_part}high resolution action wallpaper'.strip(),
-                f'"{entity}" {tm_part}slam dunk championship photo'.strip(),
                 f'"{entity}" {yr_part}playoffs clutch action court'.strip(),
                 f'"{entity}" basketball court authentic photo',
                 f'"{entity}" {tm_part}game highlights photo'.strip(),
-                f'"{entity}" NBA finals defense shot',
                 f'"{entity}" authentic game jersey action photo'
             ]
             if opponent_entity:
@@ -577,10 +575,10 @@ class AssetFetcher:
         if len(photo_pool) < min_unique_assets:
             logger.info(f"⚠️ [AssetFetcher] Wikimedia havuzu {len(photo_pool)} adette kaldı. Pixabay NBA aksiyon fotoğrafları taranıyor...")
             pix_queries = [
-                "basketball action slam dunk",
+                "basketball player court motion action",
                 "professional basketball game court",
-                "basketball player defense shot",
-                "basketball arena championship",
+                "basketball player defense jumper",
+                "basketball arena motion",
                 "basketball court action player"
             ]
             for pq in pix_queries:

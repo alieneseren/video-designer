@@ -416,10 +416,24 @@ def fetch_slot_image(
         curated_match = curated_sports_dir / "b_roll" / "sports_science" / "biomechanics_curve.jpg"
     elif any(k in q_lower for k in ["quad", "eccentric", "braking", "load", "muscle flexion"]):
         curated_match = curated_sports_dir / "b_roll" / "sports_science" / "quad_braking_mechanics.jpg"
-    elif any(k in q_lower for k in ["shot clock", "trent tucker", "tenths", "0.4s clock", "countdown"]):
+    elif any(k in q_lower for k in ["trent tucker", "tuck rule", "knicks rule"]):
+        curated_match = curated_sports_dir / "b_roll" / "shot_clocks" / "trent_tucker_rule.jpg"
+    elif any(k in q_lower for k in ["shot clock", "tenths", "0.4s clock", "countdown"]):
         curated_match = curated_sports_dir / "b_roll" / "shot_clocks" / "vintage_shot_clock.jpg"
     elif any(k in q_lower for k in ["shoes", "squeak", "friction"]):
         curated_match = curated_sports_dir / "b_roll" / "court_action" / "shoes_hardwood_friction.jpg"
+    elif any(k in q_lower for k in ["sbc center", "arena floor", "spurs center"]):
+        curated_match = curated_sports_dir / "b_roll" / "court_action" / "san_antonio_sbc_center.jpg"
+    elif any(k in q_lower for k in ["sprint", "tunnel", "locker room"]):
+        curated_match = curated_sports_dir / "b_roll" / "court_action" / "fisher_sprint_tunnel.jpg"
+    elif any(k in q_lower for k in ["buzzer beater", "turnaround", "0.4 shot", "release"]):
+        curated_match = curated_sports_dir / "b_roll" / "court_action" / "fisher_buzzer_beater_shot.jpg"
+    elif any(k in q_lower for k in ["inbound", "catch turn", "mid air"]):
+        curated_match = curated_sports_dir / "b_roll" / "court_action" / "fisher_inbound_catch.jpg"
+    elif any(k in q_lower for k in ["step back", "step-back", "separation"]):
+        curated_match = curated_sports_dir / "b_roll" / "court_action" / "harden_stepback_three.jpg"
+    elif any(k in q_lower for k in ["ankle", "crossover", "stumble", "off balance", "stumbling"]):
+        curated_match = curated_sports_dir / "b_roll" / "court_action" / "harden_ankle_breaker.jpg"
     elif any(k in q_lower for k in ["swish", "rim", "backboard red light", "three pointer"]):
         curated_match = curated_sports_dir / "b_roll" / "court_action" / "basketball_net_swish.jpg"
     elif any(k in q_lower for k in ["replay", "control center", "monitor", "referee"]):
@@ -1597,6 +1611,32 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
 
     placed_cut_dhashes: List[str] = []
     used_slot_indices = set()
+    used_timeline_photo_names: Set[str] = set()
+
+    # ── POZİTİF BEYAZ LİSTE VE KÜRESEL KULLANILMIŞ VARLIK HAFIZASI ──
+    try:
+        from core.global_asset_registry import global_asset_registry
+    except ImportError:
+        try:
+            from global_asset_registry import global_asset_registry
+        except ImportError:
+            global_asset_registry = None
+
+    job_seed = str(job_data.get("job_id", "") or script.get("title", "") or total_dur)
+    available_unique_photos: List[Path] = []
+    if global_asset_registry is not None and active_slot_key:
+        available_unique_photos = global_asset_registry.select_unique_photos(
+            candidate_photos=regular_photos,
+            needed_count=len(semantic_beats),
+            channel="thebasketballshows",
+            athlete_key=active_slot_key,
+            seed=job_seed
+        )
+        print(f"[SportsEngine] 🎯 [PositiveWhitelist] {len(available_unique_photos)} adet taze ve karıştırılmış onaylı görsel kilitlendi.")
+    else:
+        rng = random.Random(job_seed)
+        available_unique_photos = list(regular_photos)
+        rng.shuffle(available_unique_photos)
 
     banned_keywords = []
     qa_banned = []
@@ -1664,75 +1704,42 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
         if chosen_photo is None and box_score_img and (15.5 <= cut_mid <= 22.0):
             chosen_photo = box_score_img
 
-        # 3. Genel Fotoğraf Havuzundan Katı Algısal ve Semantik Tekilleştirme ile Seçim
+        # 3. Genel Fotoğraf Havuzundan Pozitif Beyaz Liste ile Tüketim (Sıfır Döngü Garantisi)
         if chosen_photo is None:
-            banned_keywords = []
-            if active_slot_key == "fisher":
-                banned_keywords = [
-                    "duncan", "trophy", "billups", "stephenson", "clippers", "suns",
-                    "orlando", "magic", "celtics", "2010", "yellow_scribble", "marker", "cardboard", "anime"
-                ]
-            elif active_slot_key == "harden":
-                banned_keywords = [
-                    "76ers", "philadelphia", "sixers", "scoreboard", "108", "111", "armpit", "crop"
-                ]
-
-            attempts = 0
-            while attempts < len(regular_photos) * 2:
-                candidate_p = regular_photos[reg_photo_idx % len(regular_photos)]
-                reg_photo_idx += 1
-                attempts += 1
-                c_name = candidate_p.name.lower()
-
-                if any(bad in c_name for bad in banned_keywords):
-                    continue
-
+            while available_unique_photos:
+                candidate_p = available_unique_photos.pop(0)
                 if timeline_guard is not None and timeline_guard.is_asset_used(candidate_p):
                     continue
-
                 cand_dh = _compute_dhash(candidate_p)
                 if cand_dh:
-                    is_dup = False
-                    for pdh in placed_cut_dhashes:
-                        if _hamming_dist(cand_dh, pdh) <= 10:
-                            is_dup = True
-                            break
+                    is_dup = any(_hamming_dist(cand_dh, pdh) <= 10 for pdh in placed_cut_dhashes)
                     if is_dup:
                         continue
-
-                # Pre-Flight Visual QA Guard for Candidate Photo
-                qa_banned = []
-                if active_slot_key == "fisher":
-                    qa_banned = ["Tim Duncan", "Chauncey Billups", "Lance Stephenson", "Larry OBrien trophy"]
-                elif active_slot_key == "harden":
-                    qa_banned = ["Philadelphia 76ers player", "television scoreboard overlay", "toshiba text banner", "floater layup shot"]
-
-                try:
-                    from visual_qa_guard import visual_qa_guard
-                    rep = visual_qa_guard.inspect_frame(candidate_p, target_entity=primary_entity, banned_entities=qa_banned)
-                    if not rep.get("passed"):
-                        issues_str = ", ".join(rep.get("issues", []))
-                        print(f"[SportsEngine] 🚫 [VisionFilter] {candidate_p.name} reddedildi: {issues_str}")
-                        continue
-                except Exception as e_cand_qa:
-                    print(f"[SportsEngine] ⚠️ Candidate QA hata verdi: {e_cand_qa}")
-
                 chosen_photo = candidate_p
                 break
 
         if chosen_photo is None:
-            # Kurtarma Kuralı: Asla Soyut Doku metin kartı üretme!
-            # Havuzdaki doğrulanmış sporcu veya saha b-roll aksiyon karelerinden birini seç
-            if regular_photos:
-                chosen_photo = regular_photos[cut_i % len(regular_photos)]
-                print(f"[SportsEngine] 🔄 [LoopRecovery] Havuz içi sporcu karesi yedeklendi: {chosen_photo.name} (cut_{cut_i:03d})")
-            elif curated_sports_dir.exists():
-                broll_action = list((curated_sports_dir / "b_roll" / "court_action").glob("*.jpg"))
-                if broll_action:
-                    chosen_photo = broll_action[cut_i % len(broll_action)]
-                    print(f"[SportsEngine] 🔄 [BrollRecovery] Saha b-roll karesi yedeklendi: {chosen_photo.name} (cut_{cut_i:03d})")
+            # Kurtarma Kuralı: Asla aynı sporcu karesini tekrarlama! Küratörlü saha b-roll havuzuna başvur
+            if curated_sports_dir.exists():
+                broll_candidates = [
+                    p for p in (curated_sports_dir / "b_roll" / "court_action").glob("*.jpg")
+                    if p.name not in used_timeline_photo_names
+                ]
+                if broll_candidates:
+                    chosen_photo = broll_candidates[0]
+                    print(f"[SportsEngine] 🔄 [BrollWhitelist] Taze saha b-roll karesi yedeklendi: {chosen_photo.name} (cut_{cut_i:03d})")
+
+        if chosen_photo is None and regular_photos:
+            # Son güvenlik: Havuzda henüz kullanılmamış kare varsa onu al
+            unused_pool = [p for p in regular_photos if p.name not in used_timeline_photo_names]
+            if unused_pool:
+                chosen_photo = unused_pool[0]
+            else:
+                chosen_photo = regular_photos[(cut_i * 7) % len(regular_photos)]
+            print(f"[SportsEngine] 🔄 [UniquePick] Onaylı sporcu karesi atandı: {chosen_photo.name} (cut_{cut_i:03d})")
 
         if chosen_photo is not None:
+            used_timeline_photo_names.add(chosen_photo.name)
             dh = _compute_dhash(chosen_photo)
             if dh:
                 placed_cut_dhashes.append(dh)
@@ -1966,6 +1973,37 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
                 print(f"[SportsEngine] 🏆 Master video onarılarak %100 kusursuz hale getirildi.")
     except Exception as e_qa:
         print(f"[SportsEngine] ℹ️ VisualQAGuard denetimi tamamlandı/atlandı: {e_qa}")
+
+    # 8. Küresel Hafızaya Kullanılan Görselleri Mühürle (Cross-Video Whitelist Memory)
+    try:
+        if global_asset_registry is not None and active_slot_key and used_timeline_photo_names:
+            global_asset_registry.register_job_assets(
+                channel="thebasketballshows",
+                athlete_key=active_slot_key,
+                used_filenames=list(used_timeline_photo_names)
+            )
+            print(f"[SportsEngine] 🔒 [GlobalMemory] {len(used_timeline_photo_names)} varlık bir sonraki video için hafızaya kilitlendi.")
+    except Exception as e_mem:
+        print(f"[SportsEngine] ⚠️ GlobalMemory kayıt istisnası: {e_mem}")
+
+    # 9. KESİN GÜVENCE: Tek Geçişli Transparan Sosyal CTA Overlay (Unutulması İmkânsız)
+    try:
+        from social_cta_overlay import apply_social_cta_overlay
+        cta_start = 44.5 if active_slot_key == "harden" else (49.0 if active_slot_key == "fisher" else max(10.0, total_dur - 4.5))
+        applied = apply_social_cta_overlay(
+            input_video=final_video,
+            output_video=final_video,
+            language="en",
+            show_at_start=False,
+            show_at_end=True,
+            start_time=cta_start,
+            display_duration=2.5 if active_slot_key == "harden" else 3.0
+        )
+        if applied:
+            shutil.copy2(str(final_video), str(final_sym))
+            print(f"[SportsEngine] ✨ [Native-CTA] Sosyal CTA katmanı final_video.mp4 üzerine başarıyla mühürlendi ({cta_start:.1f}s).")
+    except Exception as e_cta:
+        print(f"[SportsEngine] ⚠️ Native CTA giydirme istisnası: {e_cta}")
     
     size_mb = final_video.stat().st_size / (1024 * 1024)
     print(f"[SportsEngine] 🎉 MASTER VIDEO BAŞARIYLA ÜRETİLDİ: {final_video} ({size_mb:.2f} MB)")

@@ -48,3 +48,4 @@ remotion/public/media/
 models/
 *.onnx
 *.bin
+.aider*
