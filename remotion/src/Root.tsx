@@ -4,7 +4,8 @@ import { WhatsAppVideo } from "./compositions/WhatsAppVideo";
 import { RedditVideo } from "./compositions/RedditVideo";
 import { ConnectomeClip, ConnectomeClipProps } from "./compositions/ConnectomeClip";
 import { StoryIllustratedVideo } from "./compositions/StoryIllustratedVideo";
-import { WhatsAppVideoProps, RedditVideoProps, StoryIllustratedVideoProps } from "./types";
+import { BasketballShorts } from "./compositions/BasketballShorts";
+import { WhatsAppVideoProps, RedditVideoProps, StoryIllustratedVideoProps, BasketballShortsProps } from "./types";
 
 interface ExtendedClipProps extends ConnectomeClipProps {
   totalFrames?: number;
@@ -191,6 +192,32 @@ export const RemotionRoot: React.FC = () => {
           spikes: [],
           isVertical: false,
           audioPath: "audio.wav",
+        }}
+      />
+
+      {/* 🏀 Basketball Shorts - Modern Web Standartları & Sıfır Döngü Render Motoru */}
+      <Composition
+        id="BasketballShorts"
+        component={BasketballShorts as any}
+        durationInFrames={1500}
+        fps={30}
+        width={1080}
+        height={1920}
+        calculateMetadata={async ({ props }: { props: BasketballShortsProps }) => {
+          return {
+            durationInFrames: Math.max(30, props.durationInFrames || 1500),
+            fps: props.fps || 30,
+          };
+        }}
+        defaultProps={{
+          topic: "NBA Sports Science",
+          categoryBadgeText: "🏀 SPORTS SCIENCE",
+          badgeDurationFrames: 120,
+          audioPath: "",
+          cuts: [],
+          sentences: [],
+          fps: 30,
+          durationInFrames: 1500,
         }}
       />
     </>

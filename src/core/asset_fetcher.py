@@ -152,13 +152,20 @@ class AssetFetcher:
         """
         MediaWiki API'sinin 0 sonuç dönmesini engelleyen temiz arama varyantları türetir.
         Karakter adını KESİNLİKLE korur; asla salt takım veya genel salon sorgusu üretmez.
+        Kural 1: Negatif '-' kelimeler asla Wikimedia veya harici arama API'lerine gönderilmez.
         """
+        # Negatif belirteçleri (-ticket, -stub vb.) arama sorgusundan tamamen ayıkla
+        cleaned_base = re.sub(r'-\S+', '', raw_query).strip()
+        cleaned_base = re.sub(r'\s+', ' ', cleaned_base)
+        if not cleaned_base:
+            cleaned_base = raw_query
+
         # Tırnaklı ana karakter(ler)i tespit et (örn: '"Hakeem Olajuwon"')
-        quoted_entities = re.findall(r'"([^"]+)"', raw_query)
-        unquoted_rest = re.sub(r'"[^"]+"', '', raw_query).strip()
+        quoted_entities = re.findall(r'"([^"]+)"', cleaned_base)
+        unquoted_rest = re.sub(r'"[^"]+"', '', cleaned_base).strip()
         rest_words = [w for w in unquoted_rest.split() if w.strip()]
 
-        variants: List[str] = [raw_query]
+        variants: List[str] = [cleaned_base]
 
         if quoted_entities:
             main_ent = quoted_entities[0]
@@ -176,7 +183,7 @@ class AssetFetcher:
             variants.append(f"{main_ent} NBA")
         else:
             # Tırnak yoksa kelimelerden türet ama en az ilk 2 kelimeyi (oyuncu adı) zorunlu tut
-            clean = re.sub(r'["\']', '', raw_query).strip()
+            clean = re.sub(r'["\']', '', cleaned_base).strip()
             words = clean.split()
             variants.append(clean)
             if len(words) >= 2:
@@ -197,22 +204,24 @@ class AssetFetcher:
 
     @classmethod
     def search_wikimedia_commons(cls, query: str, limit: int = 15, bad_keywords: Optional[List[str]] = None) -> List[str]:
-        """Wikimedia Commons API üzerinden gerçek NBA fotoğraflarını arar (Negatif hariç tutma ve bilet/salon korumalı)."""
+        """Wikimedia Commons API üzerinden gerçek NBA fotoğraflarını arar (Geniş 3-4 kelimelik sorgu; havuz kurumasını önler)."""
         bad_words = set((bad_keywords or []) + BLACK_LISTED_TERMS)
         query_variants = cls.clean_query_for_wikimedia(query)
         urls: List[str] = []
         seen_urls: Set[str] = set()
-
-        # Negatif arama hariç tutmaları (MediaWiki gsrsearch için)
-        neg_suffix = " -ticket -stub -jumbotron -scoreboard -concession -bar -arena -Scola -Head -Harden"
 
         for q_try in query_variants:
             if len(urls) >= limit:
                 break
             try:
                 api_url = "https://commons.wikimedia.org/w/api.php"
-                # MediaWiki API'sine negatif filtreleri zincirle
-                search_query = f"{q_try}{neg_suffix}" if "-" not in q_try else q_try
+                # Arama API'sine negatif (-) kelimeler zincirlenmez (Pool Starvation önlenir)
+                # Sadece en anlamlı 3-4 kelimelik geniş sorgu gönderilir
+                clean_terms = re.sub(r'["\'-]', ' ', q_try).strip()
+                search_query = " ".join([w for w in clean_terms.split() if w.strip()][:4])
+                if not search_query:
+                    search_query = q_try
+
                 params = {
                     "action": "query",
                     "generator": "search",

@@ -85,3 +85,42 @@ export interface StoryIllustratedVideoProps {
   durationInFrames: number;
 }
 
+export interface BasketballCutItem {
+  id: string | number;
+  mediaPath: string;
+  mediaType: "video" | "image";
+  startFrame: number;
+  durationInFrames: number;
+  locked?: boolean;
+  source_video_id?: string;
+  concrete_visual_query?: string;
+  target_subject?: string;
+}
+
+export interface BasketballWordItem {
+  word: string;
+  startFrame: number;
+  endFrame: number;
+}
+
+export interface BasketballSentenceItem {
+  text: string;
+  startFrame: number;
+  durationInFrames: number;
+  words?: BasketballWordItem[];
+}
+
+export interface BasketballShortsProps {
+  topic: string;
+  categoryBadgeText?: string;
+  badgeDurationFrames?: number;
+  audioPath: string;
+  bgmPath?: string;
+  bgmVolume?: number;
+  cuts: BasketballCutItem[];
+  sentences: BasketballSentenceItem[];
+  fps: number;
+  durationInFrames: number;
+}
+
+

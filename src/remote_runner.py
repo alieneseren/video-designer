@@ -164,7 +164,8 @@ class RemoteRunner:
         script_data: dict,
         custom_images: Optional[dict] = None,
         custom_audios: Optional[dict] = None,
-        youtube_upload: bool = False
+        youtube_upload: bool = False,
+        extra_job_data: Optional[dict] = None
     ) -> Dict[str, Any]:
         """
         Sunucuda otonom video üretim görevini başlatır.
@@ -235,6 +236,8 @@ class RemoteRunner:
             "youtube_upload": youtube_upload,
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")
         }
+        if extra_job_data and isinstance(extra_job_data, dict):
+            payload.update(extra_job_data)
         payload.update(self._remote_tts_options())
 
         # 2. Geçici yerel dosyaya yaz ve SCP ile sunucuya aktar
@@ -274,6 +277,93 @@ class RemoteRunner:
             "status": "dispatched",
             "message": "Görev Oracle Cloud sunucusuna aktarıldı ve düşük öncelikle başlatıldı."
         }
+
+    def dispatch_job_with_local_distillation(
+        self,
+        job_id: str,
+        channel_id: str,
+        channel_config: dict,
+        row_id: str,
+        script_data: dict,
+        custom_images: Optional[dict] = None,
+        custom_audios: Optional[dict] = None,
+        youtube_upload: bool = False,
+        purge_rejected_after_learning: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Yerel LM Studio multimodal AI (Qwen 3.5 / Gemma 4) ile materyalleri denetleyip
+        damıtarak sunucuda kesin render başlatır.
+        1. Aday görselleri 'kontrol/{job_id}/materials/' staging klasöründe toplar.
+        2. LocalMaterialAuditor ile inceler, alakasızları eler, negatif hafızaya kaydeder.
+        3. Yalnızca %100 onaylanan materyallerle approved_manifest.json oluşturup sunucuya aktarır.
+        4. Sunucuda '--strict-materials-only' ile kesin ve döngüsüz render başlatır.
+        """
+        try:
+            from local_material_auditor import LocalMaterialAuditor
+            from staging_manager import StagingManager
+        except ImportError:
+            from src.local_material_auditor import LocalMaterialAuditor
+            from src.staging_manager import StagingManager
+
+        # 1. Kontrol ve staging yöneticisini başlat
+        staging = StagingManager(channel_id=channel_id, job_id=job_id)
+
+        # 2. Aday görselleri staging klasörüne topla
+        if custom_images and isinstance(custom_images, dict):
+            for k, val in custom_images.items():
+                if val and os.path.isfile(str(val)):
+                    try:
+                        staging.add_candidate(val)
+                    except Exception as e:
+                        print(f"[RemoteRunner] Aday ekleme uyarısı ({val}): {e}")
+
+        # 3. Yerel multimodal denetçi ile denetim ve damıtma yap
+        auditor = LocalMaterialAuditor()
+        topic = script_data.get("title") or channel_config.get("topic_category") or channel_id
+        scenes = script_data.get("scenes") or []
+
+        distillation_report = staging.run_distillation(
+            auditor=auditor,
+            topic=topic,
+            scenes=scenes,
+            purge_rejected_media=purge_rejected_after_learning
+        )
+
+        # 4. Onaylanan materyalleri sunucuya eşitle (scp)
+        remote_job_dir = f"{self.remote_dir}/jobs/{job_id}"
+        staging.sync_to_remote_server(
+            remote_host=self.host,
+            remote_user=self.user,
+            ssh_key_path=self.key_path,
+            remote_job_dir=remote_job_dir
+        )
+
+        # 5. Sunucuda strict render başlat
+        extra_flags = {
+            "strict_materials_only": True,
+            "approved_manifest_path": f"{remote_job_dir}/materials/approved_manifest.json",
+            "distillation_passed": distillation_report.passed,
+            "distillation_stats": {
+                "approved_count": distillation_report.approved_count,
+                "rejected_count": distillation_report.rejected_count,
+                "coverage": distillation_report.scene_coverage_ratio
+            }
+        }
+
+        # Standart dispatch_job çağrısı
+        res = self.dispatch_job(
+            job_id=job_id,
+            channel_id=channel_id,
+            channel_config=channel_config,
+            row_id=row_id,
+            script_data=script_data,
+            custom_images=custom_images,
+            custom_audios=custom_audios,
+            youtube_upload=youtube_upload,
+            extra_job_data=extra_flags
+        )
+        res["distillation_report"] = distillation_report.to_dict()
+        return res
 
     @staticmethod
     def _remote_tts_options() -> dict:

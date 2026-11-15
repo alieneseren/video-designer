@@ -595,6 +595,7 @@ class ContextLockedQuery:
     team_name: Optional[str]
     action_keyword: Optional[str]
     dynamic_negatives: List[str]
+    broad_search_query: str = ""
 
     @property
     def anchored_queries(self) -> List[str]:
@@ -609,7 +610,8 @@ class ContextLockedQuery:
             "target_year": self.target_year,
             "team_name": self.team_name,
             "action_keyword": self.action_keyword,
-            "dynamic_negatives": self.dynamic_negatives
+            "dynamic_negatives": self.dynamic_negatives,
+            "broad_search_query": self.broad_search_query
         }
 
 
@@ -868,6 +870,29 @@ class QueryBuilder:
             return " ".join(filtered[:3])
 
         return "basketball action"
+
+    @classmethod
+    def build_broad_search_query(cls, entity: str, action_keyword: Optional[str] = None, max_words: int = 4) -> str:
+        """
+        Havuz Kurumasını (Pool Starvation) Önleyen 3-4 Kelimelik Geniş Arama Motoru Sorgusu:
+        - Arama API'lerine (YouTube, Wikimedia, Pixabay, Pexels vb.) negatif (-) kelimeler
+          veya 15+ kelimelik aşırı kısıtlayıcı cümleler gönderildiğinde 0 sonuç döner (havuz kurur).
+        - Bu metot yalnızca en vurucu 3-4 kelimelik temiz geniş sorgu üretir.
+        - Örnek: 'James Harden' + 'step back three pointer' -> 'James Harden step back'
+        - İnce eleme ve negatif filtreleme işi indirildikten sonra yerel SigLIP/CLIP katmanına bırakılır.
+        """
+        clean_entity = re.sub(r'["\']', '', entity).strip()
+        if not action_keyword:
+            words = clean_entity.split()
+            return " ".join(words[:max_words])
+
+        clean_action = re.sub(r'["\'-]', ' ', action_keyword).strip()
+        action_words = [w for w in clean_action.split() if w.lower() not in STOP_WORDS]
+        
+        selected_action = " ".join(action_words[:2]) if action_words else ""
+        combined = f"{clean_entity} {selected_action}".strip()
+        words = combined.split()
+        return " ".join(words[:max_words])
 
     @classmethod
     def build_multi_queries(
@@ -1202,6 +1227,8 @@ class QueryBuilder:
             script_text=combined_text
         )
 
+        broad_query = cls.build_broad_search_query(entity, action_or_kw, max_words=4)
+
         return ContextLockedQuery(
             primary_query=primary_query,
             fallback_queries=fallback_queries,
@@ -1209,7 +1236,8 @@ class QueryBuilder:
             target_year=year,
             team_name=team,
             action_keyword=action_or_kw,
-            dynamic_negatives=dynamic_negatives
+            dynamic_negatives=dynamic_negatives,
+            broad_search_query=broad_query
         )
 
 

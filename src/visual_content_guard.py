@@ -306,22 +306,29 @@ class VisualContentGuard:
     ) -> Optional[Path]:
         """
         İndirilen birden çok aday görsel/video arasından dış sese en uygun olanını seçer.
+        Yalnızca kalite kalkanını geçen (accepted=True) adaylar arasından en yüksek skorlu olanı seçer.
+        Eğer hiçbir aday kalkanı geçemezse None döner; elenmiş bozuk adayları montaja sokmaz.
         """
         valid_candidates = [Path(p) for p in candidate_paths if Path(p).exists()]
         if not valid_candidates:
             return None
-        if len(valid_candidates) == 1:
-            return valid_candidates[0]
 
-        scored = []
+        accepted_candidates = []
         for c in valid_candidates:
             acc, score, r = self.verify_scene_asset(c, narration, category, topic)
-            scored.append((score, c, r))
+            if acc:
+                accepted_candidates.append((score, c, r))
+            else:
+                print(f"[VISUAL-GUARD] 🚫 Aday elendi: {c.name} (Skor: {score:.2f}, Neden: {r})")
+
+        if not accepted_candidates:
+            print(f"[VISUAL-GUARD] 🚫 Adayların hiçbiri kalite kapısını geçemedi ({len(valid_candidates)} aday elendi).")
+            return None
 
         # En yüksek skora göre sırala
-        scored.sort(key=lambda x: x[0], reverse=True)
-        best_score, best_path, best_reason = scored[0]
-        print(f"[VISUAL-GUARD] 🎯 {len(valid_candidates)} aday arasından en iyi görsel seçildi: {best_path.name} (Skor: {best_score:.2f})")
+        accepted_candidates.sort(key=lambda x: x[0], reverse=True)
+        best_score, best_path, best_reason = accepted_candidates[0]
+        print(f"[VISUAL-GUARD] 🎯 {len(accepted_candidates)} onaylı aday arasından en iyi görsel seçildi: {best_path.name} (Skor: {best_score:.2f})")
         return best_path
 
 

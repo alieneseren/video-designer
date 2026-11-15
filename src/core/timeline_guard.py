@@ -401,17 +401,20 @@ class TimelineGuard:
     enforce_video_clips: bool = False
     max_raw_occurrences: int = 1
     max_occurrences_per_source: int = 1
+    max_slices_per_source_id: int = 1
     used_timeline_assets: Dict[str, int] = {}
     used_timeline_hashes: Set[str] = set()
     used_perceptual_hashes: List[str] = []
+    used_source_ids: Set[str] = set()
 
     @classmethod
     def reset_timeline(cls):
-        """Zaman çizelgesi varlık kullanım, MD5 ve algısal dHash kayıtlarını sıfırlar."""
+        """Zaman çizelgesi varlık kullanım, MD5, source_id ve algısal dHash kayıtlarını sıfırlar."""
         cls.used_timeline_assets.clear()
         cls.used_timeline_hashes.clear()
         cls.used_perceptual_hashes.clear()
-        logger.info("🔄 [TimelineGuard] Zaman çizelgesi varlık, MD5 ve algısal dHash kayıtları sıfırlandı.")
+        cls.used_source_ids.clear()
+        logger.info("🔄 [TimelineGuard] Zaman çizelgesi varlık, MD5, source_id ve algısal dHash kayıtları sıfırlandı.")
 
     @staticmethod
     def compute_file_hash(file_path: Union[str, Path]) -> str:
@@ -469,8 +472,17 @@ class TimelineGuard:
             return 999
 
     @classmethod
-    def is_asset_used(cls, asset_path: Union[str, Path], max_hamming_dist: int = 10) -> bool:
-        """Bu kaynak görsel (MD5, dosya yolu veya algısal dHash bazında) daha önce bu render zaman çizelgesinde kullanıldı mı?"""
+    def is_asset_used(
+        cls,
+        asset_path: Union[str, Path],
+        max_hamming_dist: int = 10,
+        source_id: Optional[str] = None
+    ) -> bool:
+        """Bu kaynak görsel veya video (source_id, MD5, dosya yolu veya algısal dHash bazında) daha önce kullanıldı mı?"""
+        if source_id and source_id in cls.used_source_ids:
+            logger.info(f"[TimelineGuard] 🛡️ Same-Source aşımı engellendi: '{source_id}' daha önce kullanıldı!")
+            return True
+
         f_hash = cls.compute_file_hash(asset_path)
         if f_hash and f_hash in cls.used_timeline_hashes:
             return True
@@ -489,13 +501,18 @@ class TimelineGuard:
         return False
 
     @classmethod
-    def register_timeline_asset(cls, asset_path: Union[str, Path]) -> int:
+    def register_timeline_asset(
+        cls,
+        asset_path: Union[str, Path],
+        source_id: Optional[str] = None
+    ) -> int:
         """
-        Görselin zaman çizelgesindeki kullanım sayısını artırır ve mevcut adedi döner.
-        Katı Kural: Bir kaynak fotoğraf, videonun hangi saniyesinde olursa olsun ve hangi
-        efektle büyütülürse büyütülsün bir render boyunca yalnızca 1 kesmede kullanılabilir
-        (max_occurrences_per_source = 1). İkinci kez çağrılması kesin bir assert ile engellenir.
+        Görselin veya videonun zaman çizelgesindeki kullanım sayısını artırır ve mevcut adedi döner.
+        Katı Kural: Her kaynak (source_video_id veya görsel) bir Short içinde en fazla 1 kez kullanılabilir.
         """
+        if source_id:
+            cls.used_source_ids.add(source_id)
+
         p_str = str(Path(asset_path).resolve())
         f_hash = cls.compute_file_hash(asset_path)
 

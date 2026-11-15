@@ -405,11 +405,20 @@ Narrative Structure & Pacing:
 3. THE TWIST / CLIMAX (26-36s): Reveal what actually happened behind closed doors or why the league had to change its rules.
 4. ENGAGEMENT OUTRO (37-42s): Pose a sharp debate question to ignite the comment section. (e.g. "Is Curry better at 35 than prime Jordan? Tell me your pick.")
 
+Concrete Visual Query Rule (Deterministic Mechanical Gate 5):
+Every scene item in "visual_scenes" MUST contain "visual_query" describing physical camera framing + subject action + physical environment.
+NEVER describe abstract biomechanical concepts (e.g., NEVER write "eccentric quad braking", "kinetic deceleration mechanics", or "neurobiological superiority").
+CORRECT EXAMPLES:
+- "close up basketball sneakers stopping on NBA hardwood floor slow motion"
+- "James Harden explosive crossover step back dribble shaking defender in NBA arena"
+- "3D animation of brain synaptic firing and neurological impulses travelling down nerve"
+- "vintage red digital 7-segment LED shot clock displaying 0.3 seconds"
+
 Guidelines:
 - Tone: High energy, authoritative, dramatic, fast-paced sports commentary.
 - Audio cues: Suggest sound effects in parentheses like (swish sound), (buzzer), (sneaker squeak), (crowd erupts).
 - Word count: Strictly between 85 to 115 words so it can be voiced cleanly in 35-42 seconds without rushing.
-- JSON output with fields: title, script, visual_scenes, keywords, hook_summary, debate_question.
+- JSON output with fields: title, script, visual_scenes (list of objects with scene_id, narration, visual_query, media_type, locked: true), keywords, hook_summary, debate_question.
 """
 
 

@@ -49,3 +49,4 @@ models/
 *.onnx
 *.bin
 .aider*
+assets/quarantine/

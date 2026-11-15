@@ -110,9 +110,11 @@ def search_pixabay_video(
     if not api_key:
         return None
 
-    clean_q = re.sub(r"[^\w\s-]", "", query).strip()
-    if not clean_q:
-        clean_q = "travel scenery"
+    # Pool starvation önleme: Arama motorlarına negatif (-) kelimeler ve 15+ kelimelik cümleler
+    # yerine sadece 3-4 kelimelik temiz geniş sorgu gönderilir.
+    clean_q = re.sub(r"[^\w\s]", " ", query).strip()
+    words = [w for w in clean_q.split() if w.strip()]
+    clean_q = " ".join(words[:4]) if words else "travel scenery"
 
     params = {
         "key": api_key,
@@ -268,9 +270,10 @@ def search_pixabay_photos(
     if not api_key:
         return []
 
-    clean_q = re.sub(r"[^\w\s-]", "", query).strip()
-    if not clean_q:
-        clean_q = "travel destination"
+    # Pool starvation önleme: Geniş 3-4 kelimelik sorgu
+    clean_q = re.sub(r"[^\w\s]", " ", query).strip()
+    words = [w for w in clean_q.split() if w.strip()]
+    clean_q = " ".join(words[:4]) if words else "travel destination"
 
     params = {
         "key": api_key,
@@ -342,7 +345,10 @@ def search_wikimedia_commons_photos(
 ) -> List[Dict[str, Any]]:
     """Wikimedia Commons API'den kamu malı / Creative Commons gerçek fotoğrafları liste olarak arar."""
     import time
-    clean_q = re.sub(r"[^\w\s-]", "", query).strip()
+    # Pool starvation önleme: Geniş 3-4 kelimelik sorgu (MediaWiki API)
+    clean_q = re.sub(r"[^\w\s]", " ", query).strip()
+    words = [w for w in clean_q.split() if w.strip()]
+    clean_q = " ".join(words[:4])
     if not clean_q:
         return []
 

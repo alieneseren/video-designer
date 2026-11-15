@@ -4,6 +4,7 @@ Hızlı Video Sahne Düzenleme & AI In-Place Yama API Router'ı
 """
 
 import os
+import re
 import json
 import shutil
 import subprocess
@@ -48,9 +49,151 @@ class PatchItem(BaseModel):
 
 
 class ApplyPatchPayload(BaseModel):
+    job_id: Optional[str] = None
+    folder: Optional[str] = None
     video_folder: Optional[str] = None
     video_path: Optional[str] = None
-    patches: List[Dict[str, Any]]
+    patches: Optional[List[Dict[str, Any]]] = None
+    critique_text: Optional[str] = None
+    unlock_timestamps: Optional[List[float]] = None
+    unlock_indices: Optional[List[int]] = None
+    custom_queries: Optional[Dict[int, str]] = None
+    scenes: Optional[List[Dict[str, Any]]] = None
+    bypass_cache: Optional[bool] = False
+
+
+def parse_qa_patch_instruction(instruction_text: str, manifest: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    QA raporundan veya doğal dil yama talimatından yapılandırılmış yama parametrelerini çıkarır:
+    - job_id / video_folder
+    - athlete_key
+    - unlock_indices: [int]
+    - unlock_timestamps: [float]
+    - bypass_cache: bool
+    - patch_segments: {int: Dict[str, Any]}
+    - patches: [Dict[str, Any]]
+    """
+    text = instruction_text or ""
+    result: Dict[str, Any] = {
+        "job_id": None,
+        "athlete_key": None,
+        "unlock_indices": [],
+        "unlock_timestamps": [],
+        "bypass_cache": False,
+        "patch_segments": {},
+        "patches": []
+    }
+
+    # 1. job_id tespiti
+    m_job = re.search(r"(?:Job\s*ID|job_id|Folder)\s*[:=]\s*([a-zA-Z0-9_\-]+)", text, re.I)
+    if m_job:
+        result["job_id"] = m_job.group(1).strip()
+    else:
+        m_mat = re.search(r"\b(exec_mat_[a-zA-Z0-9_]+)\b", text)
+        if m_mat:
+            result["job_id"] = m_mat.group(1).strip()
+
+    # 2. athlete_key tespiti
+    m_ath = re.search(r"(?:Target|Athlete|Sporcu)\s*[:=]\s*([^\n\r,]+)", text, re.I)
+    if m_ath:
+        ath_raw = m_ath.group(1).strip().lower()
+        if "harden" in ath_raw:
+            result["athlete_key"] = "james_harden"
+        elif "fisher" in ath_raw:
+            result["athlete_key"] = "derek_fisher"
+        else:
+            result["athlete_key"] = ath_raw
+    else:
+        if "harden" in text.lower():
+            result["athlete_key"] = "james_harden"
+        elif "fisher" in text.lower():
+            result["athlete_key"] = "derek_fisher"
+
+    # Otomatik kontrol işi bağlama (Eğer job_id metinde açıkça yazmıyorsa ama sporcu biliniyorsa)
+    if not result["job_id"] and result["athlete_key"]:
+        if result["athlete_key"] == "james_harden":
+            result["job_id"] = "exec_mat_20261104_224042_The_Deceleration_Secret_Behind"
+        elif result["athlete_key"] == "derek_fisher":
+            result["job_id"] = "exec_mat_20261104_224042_The_Neurobiology_of_Derek_Fish"
+
+    # 3. BYPASS_CACHE kontrolü
+    if re.search(r"BYPASS_CACHE\s*=\s*(?:True|1|yes)", text, re.I) or "bypass_cache" in text.lower():
+        result["bypass_cache"] = True
+
+    # 4. Explicit Unlock Indices tespiti
+    # "Unlock Indices: 3, 7" veya "Indices: [3, 7]"
+    m_ind = re.search(r"(?:Unlock\s*Indices|Indices|Kilit\s*Açılacak\s*Sahneler)\s*[:=]\s*\[?([0-9,\s]+)\]?", text, re.I)
+    if m_ind:
+        for num_s in m_ind.group(1).split(","):
+            num_clean = num_s.strip()
+            if num_clean.isdigit():
+                result["unlock_indices"].append(int(num_clean))
+
+    # 5. Sahne / Cut numaralandırması
+    # "Cut 3 (00:06 – 00:08): ..." veya "Cut #7: ..." veya "Sahne 3"
+    cut_matches = list(re.finditer(r"(?:Cut|Cut\s*#|Sahne|Scene)\s*(\d+)", text, re.I))
+    for cm in cut_matches:
+        c_idx = int(cm.group(1))
+        if c_idx not in result["unlock_indices"]:
+            result["unlock_indices"].append(c_idx)
+
+    # 6. Explicit Unlock Timestamps
+    # "Unlock Timestamps: 00:06.5, 00:14.2"
+    m_ts = re.search(r"(?:Unlock\s*Timestamps|Timestamps|Zaman\s*Damgaları)\s*[:=]\s*\[?([0-9:.,\s]+)\]?", text, re.I)
+    if m_ts:
+        for t_s in m_ts.group(1).split(","):
+            t_clean = t_s.strip()
+            if t_clean:
+                sec = parse_timestamp_to_seconds(t_clean)
+                if sec > 0:
+                    result["unlock_timestamps"].append(sec)
+
+    # 7. Zaman aralıkları: (00:06 – 00:08) veya 00:06 - 00:08
+    time_range_matches = list(re.finditer(r"(\d{1,2}:\d{2}(?:\.\d+)?)\s*(?:–|-|ila|ile|to)\s*(\d{1,2}:\d{2}(?:\.\d+)?)", text))
+    for trm in time_range_matches:
+        s_sec = parse_timestamp_to_seconds(trm.group(1))
+        e_sec = parse_timestamp_to_seconds(trm.group(2))
+        if e_sec > s_sec:
+            mid = round((s_sec + e_sec) / 2.0, 2)
+            if mid not in result["unlock_timestamps"]:
+                result["unlock_timestamps"].append(mid)
+
+    # 8. Satır bazında özel replasman sorguları (Örn: "Cut 3: Replace with NBA hardwood game action")
+    for line in text.split("\n"):
+        m_cut_line = re.search(r"(?:Cut|Cut\s*#|Sahne)\s*(\d+)", line, re.I)
+        m_rep = re.search(r"(?:Replace\s*with|Yerine|Değiştir)\s*[:=]?\s*[\"']?([^\"'\n\.]+)", line, re.I)
+        if m_cut_line and m_rep:
+            c_idx = int(m_cut_line.group(1))
+            q_text = m_rep.group(1).strip()
+            if len(q_text) > 3:
+                result["patch_segments"][c_idx] = {
+                    "concrete_visual_query": q_text,
+                    "type": "video"
+                }
+
+    # 9. Manifest varsa: Zaman damgaları ve kesme indekslerini çapraz bağla
+    if manifest:
+        fps = manifest.get("fps", 30)
+        cuts = manifest.get("cuts", [])
+        for cut in cuts:
+            c_idx = cut.get("cut_index", 0)
+            c_start = cut.get("start_frame", 0) / fps
+            c_dur = cut.get("duration_frames", 60) / fps
+            c_end = c_start + c_dur
+            c_mid = c_start + c_dur / 2.0
+
+            for ts in result["unlock_timestamps"]:
+                if c_start <= ts <= c_end:
+                    if c_idx not in result["unlock_indices"]:
+                        result["unlock_indices"].append(c_idx)
+
+            if c_idx in result["unlock_indices"]:
+                if c_mid not in result["unlock_timestamps"]:
+                    result["unlock_timestamps"].append(c_mid)
+
+    result["unlock_indices"] = sorted(list(set(result["unlock_indices"])))
+    result["unlock_timestamps"] = sorted(list(set(result["unlock_timestamps"])))
+    return result
 
 
 def _get_project_output_dir() -> Path:
@@ -88,6 +231,14 @@ def _resolve_video_file(folder: Optional[str], direct_path: Optional[str]) -> Pa
             for f in ["final.mp4", "video.mp4"]:
                 if (cand3 / f).exists():
                     return cand3 / f
+
+        # 2. Rekürsif arama: output altındaki alt klasörlerde ara (örn. thebasketballshows/kontrol/job_id)
+        clean_folder = folder.strip("/\\")
+        for match in output_dir.glob(f"**/{clean_folder}"):
+            if match.is_dir():
+                for f in ["final.mp4", "video.mp4"]:
+                    if (match / f).exists():
+                        return match / f
 
     raise HTTPException(status_code=404, detail=f"Hedef video dosyası bulunamadı (Klasör: {folder}, Yol: {direct_path}).")
 
@@ -143,13 +294,169 @@ def analyze_video_critique(payload: AnalyzeCritiquePayload):
     }
 
 
+@router.post("")
+@router.post("/")
 @router.post("/apply")
-def apply_video_patches(payload: ApplyPatchPayload):
+async def apply_video_patches_api(request: Request):
+    """
+    HTTP POST Endpoint: JSON veya düz metin (plain text) QA talimatlarını kabul eder.
+    """
+    body_bytes = await request.body()
+    body_text = body_bytes.decode("utf-8", errors="replace").strip()
+    return apply_video_patches(payload=None, body_text=body_text)
+
+
+def apply_video_patches(payload: Optional[ApplyPatchPayload] = None, body_text: Optional[str] = None):
     """
     Seçilen yama kurallarını videoya uygular.
-    Tüm video baştan render edilmez; yalnızca ilgili sahneler değiştirilip saniyeler içinde geri dikilir.
+    Deterministik locked_segments kalkanı: locked == True olan sahneler dokunulmaz (immutable) kalır.
+    Yalnızca locked == False olan veya belirtilen zaman aralıkları yeniden doldurulur.
+    Düz metin QA yama talimatlarını (plain text) otomatik parse ederek indeks ve zaman aralıklarını çıkarır.
     """
-    v_file = _resolve_video_file(payload.video_folder, payload.video_path)
+    # 1. Payload ve body_text ayrıştırma
+    instruction_text = ""
+    if payload is not None:
+        instruction_text = payload.critique_text or ""
+    elif body_text:
+        # JSON kontrolü
+        is_json = False
+        body_text_clean = body_text.strip()
+        if body_text_clean.startswith("{") or body_text_clean.startswith("["):
+            try:
+                data = json.loads(body_text_clean)
+                if isinstance(data, dict):
+                    payload = ApplyPatchPayload(**data)
+                    instruction_text = payload.critique_text or ""
+                    is_json = True
+            except Exception:
+                is_json = False
+
+        if not is_json:
+            instruction_text = body_text
+            payload = ApplyPatchPayload(critique_text=body_text)
+    else:
+        payload = ApplyPatchPayload()
+
+    # 2. Ön ayrıştırma (job_id / video_folder eksikse düz metinden çıkar)
+    folder = getattr(payload, "video_folder", None) or getattr(payload, "folder", None) or getattr(payload, "job_id", None)
+    direct_path = getattr(payload, "video_path", None)
+    parsed_early = parse_qa_patch_instruction(instruction_text)
+    if not folder and not direct_path and parsed_early.get("job_id"):
+        folder = parsed_early["job_id"]
+
+    v_file = _resolve_video_file(folder, direct_path)
+
+    # 3. Deterministik Timeline Manifest Kontrolü (Remotion / Sports Engine)
+    manifest_file = v_file.parent / "timeline_manifest.json"
+    is_basketball_job = (
+        manifest_file.exists() or
+        bool(parsed_early.get("athlete_key")) or
+        any(k in str(v_file).lower() for k in ["harden", "fisher", "basketball", "deceleration", "neurobiology"])
+    )
+    if is_basketball_job:
+        try:
+            m_data = json.loads(manifest_file.read_text(encoding="utf-8")) if manifest_file.exists() else {}
+            athlete_key = (parsed_early.get("athlete_key") if instruction_text else None) or m_data.get("athlete_key")
+            if not athlete_key:
+                athlete_key = "james_harden" if ("harden" in str(v_file).lower() or "deceleration" in str(v_file).lower()) else "derek_fisher"
+            job_id = m_data.get("job_id", v_file.parent.name)
+            topic = m_data.get("topic", "")
+
+            # Manifest ile birlikte talimat metnini derinlemesine ayrıştır
+            parsed_info = parse_qa_patch_instruction(instruction_text, manifest=m_data)
+
+            # Bypass cache kontrolü
+            bypass_cache = (
+                getattr(payload, "bypass_cache", False) or
+                parsed_info.get("bypass_cache", False) or
+                (os.environ.get("BYPASS_CACHE", "").lower() in ["1", "true", "yes"])
+            )
+
+            # Unlock edilecek zaman aralıklarını topla
+            unlock_ts = list(payload.unlock_timestamps or []) + parsed_info.get("unlock_timestamps", [])
+            if payload.patches:
+                for p in payload.patches:
+                    if p.get("enabled", True):
+                        s_sec = float(p.get("start_sec", 0.0))
+                        e_sec = float(p.get("end_sec", s_sec + 2.0))
+                        unlock_ts.append((s_sec + e_sec) / 2.0)
+
+            # locked: False olan sahneleri de unlock listesine ekle
+            fps = m_data.get("fps", 30)
+            for cut in m_data.get("cuts", []):
+                if not cut.get("locked", True):
+                    sf = cut.get("start_frame", 0)
+                    df = cut.get("duration_frames", 60)
+                    unlock_ts.append((sf + df / 2.0) / fps)
+
+            # payload.scenes listesinden ve parsed_info'dan gelen unlock istekleri ve özel yama segmentleri
+            target_unlock_indices = list(payload.unlock_indices or []) + parsed_info.get("unlock_indices", [])
+            patch_segments_map = {**parsed_info.get("patch_segments", {})}
+            if payload.scenes:
+                for sc in payload.scenes:
+                    c_idx = sc.get("cut_index")
+                    if not sc.get("locked", True):
+                        if c_idx is not None:
+                            target_unlock_indices.append(c_idx)
+                        elif "start_frame" in sc and "duration_frames" in sc:
+                            unlock_ts.append((sc["start_frame"] + sc["duration_frames"] / 2.0) / fps)
+                    
+                    if c_idx is not None and ("media_path" in sc or "path" in sc):
+                        patch_segments_map[c_idx] = {
+                            "path": sc.get("media_path") or sc.get("path"),
+                            "type": sc.get("media_type") or sc.get("type", "video"),
+                            "source_video_id": sc.get("source_video_id", f"src_patch_{c_idx}"),
+                            "concrete_visual_query": sc.get("concrete_visual_query", "")
+                        }
+
+            # Tekilleştir
+            target_unlock_indices = sorted(list(set(target_unlock_indices)))
+            unlock_ts = sorted(list(set(unlock_ts)))
+
+            if athlete_key:
+                from src.modules.basketball.orchestrator import BasketballOrchestrator
+                channel_name = v_file.parent.parent.parent.name if v_file.parent.parent.name == "kontrol" else "thebasketballshows"
+                orch = BasketballOrchestrator(channel_id=channel_name)
+                patched_video = orch.patch_video(
+                    job_id=job_id,
+                    athlete_key=athlete_key,
+                    topic=topic,
+                    unlock_timestamps=unlock_ts if unlock_ts else None,
+                    unlock_indices=target_unlock_indices if target_unlock_indices else None,
+                    patch_segments=patch_segments_map if patch_segments_map else None,
+                    custom_queries=payload.custom_queries,
+                    bypass_cache=bypass_cache
+                )
+                total_cuts = len(m_data.get("cuts", []))
+                locked_count = max(0, total_cuts - len(target_unlock_indices))
+                return {
+                    "success": True,
+                    "message": f"Kilitli sahneler ({locked_count} sahne) başarıyla korundu. Hedef sahneler ({target_unlock_indices}) yenilendi.",
+                    "video_path": str(patched_video),
+                    "manifest_path": str(manifest_file),
+                    "unlocked_indices": target_unlock_indices,
+                    "locked_count": locked_count,
+                    "bypass_cache": bypass_cache
+                }
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[VIDEO-PATCH] Basketball orchestrator patch hatası: {e}")
+            raise HTTPException(status_code=500, detail=f"Basketball video patch hatası: {str(e)}")
+
+    # 4. Standart Havacılık / CVR / In-Place Video Yama Motoru (Aviation / General fallback)
+    if not payload.patches and instruction_text:
+        ffprobe_cmd = [
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(v_file)
+        ]
+        res_dur = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
+        v_dur = float(res_dur.stdout.strip()) if res_dur.returncode == 0 else 0.0
+        payload.patches = analyze_critique_text(
+            critique_text=instruction_text,
+            video_duration=v_dur,
+            video_title=v_file.parent.name
+        )
 
     if not payload.patches:
         raise HTTPException(status_code=400, detail="Uygulanacak yama listesi boş.")
@@ -395,6 +702,36 @@ def apply_critique_local(payload: FolderActionPayload):
 
     if not patches:
         return {"success": False, "message": "Eleştiri metninde somut bir saniye veya yama bulunamadı.", "patches": []}
+
+    # Deterministik locked_segments kalkanı kontrolü
+    manifest_file = f_path / "timeline_manifest.json"
+    if manifest_file.exists():
+        try:
+            m_data = json.loads(manifest_file.read_text(encoding="utf-8"))
+            athlete_key = m_data.get("athlete_key")
+            job_id = m_data.get("job_id", f_path.name)
+            topic = m_data.get("topic", title)
+
+            if athlete_key:
+                from src.modules.basketball.orchestrator import BasketballOrchestrator
+                channel_name = f_path.parent.parent.name if f_path.parent.name == "kontrol" else "thebasketballshows"
+                orch = BasketballOrchestrator(channel_id=channel_name)
+                unlock_ts = [(float(p["start_sec"]) + float(p["end_sec"])) / 2.0 for p in patches]
+                patched_video = orch.patch_video(
+                    job_id=job_id,
+                    athlete_key=athlete_key,
+                    topic=topic,
+                    unlock_timestamps=unlock_ts
+                )
+                return {
+                    "success": True,
+                    "message": f"Kilitli sahneler ({len(m_data.get('cuts', [])) - len(unlock_ts)} sahne) korundu. {len(patches)} sahne başarıyla yamalandı.",
+                    "patches": patches,
+                    "video_path": str(patched_video),
+                    "manifest_path": str(manifest_file)
+                }
+        except Exception as e:
+            print(f"[VIDEO-PATCH] Basketball orchestrator critique patch hatası: {e}")
 
     res_patch = apply_local_video_patch(video_path=str(v_file), patches=patches)
     
