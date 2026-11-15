@@ -9,6 +9,7 @@ with 12 FPS boiling line turbulence, expressive googly eyes, and archetype props
 import math
 import random
 from typing import Tuple, List, Optional, Dict
+import numpy as np
 from PIL import Image, ImageDraw
 
 from .satire_motion_catalog import (
