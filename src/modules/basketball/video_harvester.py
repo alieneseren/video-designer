@@ -60,6 +60,60 @@ def extract_canonical_video_id(url_or_id: str) -> str:
 
 DYNAMIC_NEGATIVE_SEARCH_FILTER = " -2k -nba2k -gameplay -ps5 -xbox"
 
+def smart_crop_9_16_image(src_path: Path, dest_path: Path, target_w: int = 1080, target_h: int = 1920) -> bool:
+    """Yatay veya dikey fotoğrafları özne (yüz/kafa) merkezli olarak 9:16 oranında akıllı kırpar (Headless Crop Engeli)."""
+    try:
+        img_bgr = cv2.imread(str(src_path))
+        if img_bgr is None:
+            return False
+        h, w = img_bgr.shape[:2]
+        target_ratio = target_w / target_h # 0.5625
+        current_ratio = w / h
+
+        if abs(current_ratio - target_ratio) < 0.02 and w >= 720 and h >= 1280:
+            resized = cv2.resize(img_bgr, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(dest_path), resized, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            return True
+
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
+        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        faces = list(face_cascade.detectMultiScale(gray, 1.1, 4))
+        if not faces:
+            faces = list(profile_cascade.detectMultiScale(gray, 1.1, 4))
+
+        if faces:
+            faces.sort(key=lambda f: f[2] * f[3], reverse=True)
+            fx, fy, fw, fh = faces[0]
+            face_cx = fx + fw // 2
+            face_cy = fy + fh // 2
+        else:
+            face_cx = w // 2
+            face_cy = int(h * 0.35)
+
+        if current_ratio > target_ratio:
+            crop_h = h
+            crop_w = int(crop_h * target_ratio)
+            crop_x = int(face_cx - crop_w / 2)
+            crop_x = max(0, min(w - crop_w, crop_x))
+            crop_y = 0
+        else:
+            crop_w = w
+            crop_h = int(crop_w / target_ratio)
+            crop_y = int(face_cy - crop_h * 0.28)
+            crop_y = max(0, min(h - crop_h, crop_y))
+            crop_x = 0
+
+        cropped = img_bgr[crop_y:crop_y + crop_h, crop_x:crop_x + crop_w]
+        resized = cv2.resize(cropped, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(dest_path), resized, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        return True
+    except Exception as e:
+        logger.warning(f"⚠️ smart_crop_9_16_image hatası ({src_path.name}): {e}")
+        return False
+
 def is_source_banned_for_project(source_id_or_path: str, athlete_key: str) -> bool:
     """Enforces strict cross-project asset isolation."""
     if not athlete_key or not source_id_or_path:
@@ -442,14 +496,10 @@ class VideoHarvester:
                 Path(f"/Users/alienes/yt-oto-video/files/assets/curated_sports/b_roll/videos/{fname}"),
             ]
 
-            if not out_file.exists():
-                for c in search_candidates:
-                    if c.exists() and c.stat().st_size > 200000:
-                        shutil.copy2(str(c), str(out_file))
-                        logger.info(f"⚡ [Yerel Önbellek] {fname} yerel kaynaktan kopyalandı ({c.name})")
-                        break
+            if self.bypass_cache and out_file.exists():
+                out_file.unlink(missing_ok=True)
 
-            if out_file.exists() and out_file.stat().st_size > 200000:
+            if not self.bypass_cache and out_file.exists() and out_file.stat().st_size > 200000:
                 downloaded[fname] = out_file
                 continue
 
@@ -723,15 +773,17 @@ class VideoHarvester:
 
         for p_src in clean_candidates:
             dest_photo = self.photos_dir / p_src.name
-            vf = "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,unsharp=5:5:1.2"
-            cmd = [
-                FFMPEG_BIN, "-y",
-                "-i", str(p_src),
-                "-vf", vf,
-                "-q:v", "2",
-                str(dest_photo)
-            ]
-            subprocess.run(cmd, capture_output=True, timeout=20)
+            ok = smart_crop_9_16_image(p_src, dest_photo)
+            if not ok or not dest_photo.exists():
+                vf = "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,unsharp=5:5:1.2"
+                cmd = [
+                    FFMPEG_BIN, "-y",
+                    "-i", str(p_src),
+                    "-vf", vf,
+                    "-q:v", "2",
+                    str(dest_photo)
+                ]
+                subprocess.run(cmd, capture_output=True, timeout=20)
             if dest_photo.exists() and dest_photo.stat().st_size > 30000:
                 w, h, lap_var = measure_laplacian_sharpness(dest_photo)
                 if lap_var < 75.0 or w < 720 or h < 720:

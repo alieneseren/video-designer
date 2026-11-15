@@ -55,7 +55,8 @@ def normalize_sports_subtitles(text: str) -> str:
         (r'(?i)\bseconds-beating\b', 'seconds. Beating'),
         (r'(?i)\bdime-ranked\b', 'dime. Ranked'),
         (r'(?i)\bdeceleration-the\b', 'deceleration, the'),
-        (r'(?i)\bfifty[\s-]five[\s-]degree\b', '55-degree'),
+        (r'(?i)\bfifty[\s-]five[\s-]degree(s)?\b', '55-degree'),
+        (r'(?i)\bfifty[\s-]five\b', '55'),
     ]
     res = text
     for pat, rep in rules:
@@ -701,7 +702,7 @@ class BasketballOrchestrator:
 
         if (force_rebuild or bypass_cache) and not unlock_indices:
             logger.info(f"🧹 [BYPASS_CACHE=True] {work_dir} altındaki eski kesitler ve geçici dosyalar sıfırlanıyor...")
-            for clean_sub in ["action_clips", "photos", "_validator_3pt_frames", "_validator_frames"]:
+            for clean_sub in ["action_clips", "photos", "raw_videos", "_validator_3pt_frames", "_validator_frames"]:
                 target_sub = work_dir / clean_sub
                 if target_sub.exists():
                     shutil.rmtree(target_sub, ignore_errors=True)

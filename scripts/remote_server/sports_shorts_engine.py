@@ -397,6 +397,51 @@ def extract_sports_video_cut(
 def format_sports_image(src_path: str, dst_path: str, target_w: int = 1080, target_h: int = 1920):
     """Görseli 9:16 oranına akıllı crop edip taranmış kenarlıkları yok eder ve sinematik kontrast/keskinlik ekler."""
     try:
+        # Özne (yüz/kafa) merkezli akıllı 9:16 kırpma (Headless crop engelleme)
+        src_p = Path(src_path)
+        dst_p = Path(dst_path)
+        try:
+            import cv2
+            img_bgr = cv2.imread(str(src_p))
+            if img_bgr is not None:
+                h, w = img_bgr.shape[:2]
+                target_ratio = target_w / target_h
+                current_ratio = w / h
+                if abs(current_ratio - target_ratio) > 0.02 or w < 720 or h < 1280:
+                    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+                    profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
+                    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                    faces = list(face_cascade.detectMultiScale(gray, 1.1, 4))
+                    if not faces:
+                        faces = list(profile_cascade.detectMultiScale(gray, 1.1, 4))
+                    if faces:
+                        faces.sort(key=lambda f: f[2] * f[3], reverse=True)
+                        fx, fy, fw, fh = faces[0]
+                        face_cx = fx + fw // 2
+                        face_cy = fy + fh // 2
+                    else:
+                        face_cx = w // 2
+                        face_cy = int(h * 0.35)
+                    if current_ratio > target_ratio:
+                        crop_h = h
+                        crop_w = int(crop_h * target_ratio)
+                        crop_x = int(face_cx - crop_w / 2)
+                        crop_x = max(0, min(w - crop_w, crop_x))
+                        crop_y = 0
+                    else:
+                        crop_w = w
+                        crop_h = int(crop_w / target_ratio)
+                        crop_y = int(face_cy - crop_h * 0.28)
+                        crop_y = max(0, min(h - crop_h, crop_y))
+                        crop_x = 0
+                    cropped = img_bgr[crop_y:crop_y + crop_h, crop_x:crop_x + crop_w]
+                    resized = cv2.resize(cropped, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
+                    dst_p.parent.mkdir(parents=True, exist_ok=True)
+                    cv2.imwrite(str(dst_p), resized, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                    return
+        except Exception as cv_e:
+            pass
+
         im = Image.open(src_path).convert("RGB")
         src_w, src_h = im.size
         src_ratio = src_w / src_h
@@ -473,7 +518,8 @@ def render_basketball_subtitle_card(
     width: int = 1080,
     height: int = 1920,
     bottom_pos: int = 240,
-    font_size: int = 44
+    font_size: int = 44,
+    badge_text: str = ""
 ) -> Image.Image:
     """
     Kullanıcının referans videosundaki (/Users/alienes/Downloads/The Weirdest Triple-Double...)
@@ -483,11 +529,34 @@ def render_basketball_subtitle_card(
     - 24px yuvarlatılmış köşeler
     - Çift renkli tipografi (İstatistikler/İsimler altın sarısı, diğer kelimeler beyaz)
     - Ekranın altından 240px yukarıda ortalanmış
+    - Üstte sabit 'SPORTS SCIENCE' kategori rozeti (top safe area, sadece ilk 4s)
     - SIFIR TAŞMA GARANTİSİ: Satır genişliği 800px ile sınırlandırılır, uzun satırlar otomatik alt satıra kaydırılır.
     """
     font = get_bold_font(font_size)
     canvas = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
+
+    # ── ÜST KATEGORİ ROZETİ (TOP CATEGORY PILL) ──
+    # Emoji temizleme (kırık glif □ çıkmasını kesinlikle engelle)
+    clean_badge = badge_text.replace("🏀", "").replace("□", "").strip() if badge_text else ""
+    if clean_badge:
+        badge_font = get_bold_font(28)
+        b_bbox = draw.textbbox((0, 0), clean_badge, font=badge_font)
+        b_tw = b_bbox[2] - b_bbox[0]
+        b_th = b_bbox[3] - b_bbox[1]
+        b_pad_x = 32
+        b_pad_y = 12
+        b_w = b_tw + (b_pad_x * 2)
+        b_h = b_th + (b_pad_y * 2)
+        b_x0 = (width - b_w) // 2
+        b_y0 = 130  # Üst güvenli alan
+        b_x1 = b_x0 + b_w
+        b_y1 = b_y0 + b_h
+        # Yumuşak gölge
+        draw.rounded_rectangle([b_x0, b_y0 + 4, b_x1, b_y1 + 4], radius=22, fill=(0, 0, 0, 110))
+        # Kapsül gövdesi ve altın çerçeve
+        draw.rounded_rectangle([b_x0, b_y0, b_x1, b_y1], radius=22, fill=(18, 22, 34, 230), outline=(251, 191, 36, 255), width=2)
+        draw.text((b_x0 + b_pad_x, b_y0 + b_pad_y - 2), clean_badge, font=badge_font, fill="#fbbf24")
 
     # 1. Aşama: Satırları piksel genişliğine göre katı bir şekilde kaydır (Wrap)
     # Maksimum metin satırı genişliği: 800px (1080px genişlikte her iki taraftan 140px güvenlik marjı)
@@ -576,27 +645,73 @@ def generate_basketball_subtitles_overlay(
     total_dur: float,
     scratch_dir: Path,
     W: int = 1080,
-    H: int = 1920
+    H: int = 1920,
+    work_dir: Optional[Path] = None,
+    category_badge: str = "SPORTS SCIENCE"
 ) -> Path:
     """
     Tüm anlatımı 2-4 kelimelik vurucu Shorts altyazı kartlarına böler.
     Her kart için PIL ile şeffaf PNG üretir ve ffmpeg concat listesi oluşturur.
     SIFIR TAŞMA GARANTİSİ: Her kart kısa tutulur ve satır genişliği piksel bazında denetlenir.
     """
-    scenes = script.get("scenes", [])
     raw_texts = []
-    if scenes and isinstance(scenes, list):
-        for sc in scenes:
-            t = sc.get("narration") or sc.get("text") or ""
-            if t.strip():
-                raw_texts.append(sanitize_sports_text(t))
-    else:
-        raw_text = script.get("narration") or script.get("story") or script.get("body") or script.get("title", "")
-        if isinstance(raw_text, list):
-            raw_text = " ".join(raw_text)
-        raw_texts.append(sanitize_sports_text(raw_text))
+    # 1. Öncelik: sentence_boundaries.json dosyasından tam konuşulan metni çek (Kapanış sorusu & CTA garantisi)
+    sb_candidates = []
+    if work_dir:
+        sb_candidates.extend([
+            work_dir / "materials" / "sentence_boundaries.json",
+            work_dir / "materials" / "audio" / "sentence_boundaries.json",
+            work_dir / "sentence_boundaries.json"
+        ])
+
+    found_sb = None
+    for cand in sb_candidates:
+        if cand.exists():
+            found_sb = cand
+            break
+
+    if found_sb:
+        try:
+            with open(found_sb, "r", encoding="utf-8") as f:
+                sb_data = json.load(f)
+            for item in sb_data:
+                item_text = item.get("text", "")
+                if item_text and item_text.strip():
+                    raw_texts.append(sanitize_sports_text(item_text.strip()))
+            print(f"[SportsEngine] 📝 Altyazı metni tam ses zamanlamalarından ({found_sb.name}) {len(raw_texts)} cümle olarak yüklendi.")
+        except Exception as e_sb:
+            print(f"[SportsEngine] sentence_boundaries okuma uyarısı: {e_sb}")
+
+    if not raw_texts:
+        scenes = script.get("scenes", [])
+        if scenes and isinstance(scenes, list):
+            for sc in scenes:
+                t = sc.get("narration") or sc.get("text") or ""
+                if t.strip():
+                    raw_texts.append(sanitize_sports_text(t))
+        else:
+            raw_text = script.get("narration") or script.get("story") or script.get("body") or script.get("title", "")
+            if isinstance(raw_text, list):
+                raw_text = " ".join(raw_text)
+            raw_texts.append(sanitize_sports_text(raw_text))
 
     full_narr = " ".join(raw_texts)
+
+    # Sayı ifadelerini ve yüzdeleri rakamsal formatla ("zero point two" -> "0.2s", "ninety ninth" -> "99th", "fifty five-degree" -> "55-degree")
+    number_replacements = [
+        (r'\bfifty[\s-]five[\s-]degree(s)?\b', '55-degree'),
+        (r'\bfifty[\s-]five\b', '55'),
+        (r'\bzero point two\b', '0.2s'),
+        (r'\bzero point three\b', '0.3s'),
+        (r'\bzero point four\b', '0.4s'),
+        (r'\bzero point three[- ]?seven\b', '0.37s'),
+        (r'\bthree hundredths of a second\b', '0.03s'),
+        (r'\bninety[- ]ninth percentile\b', '99th percentile'),
+        (r'\bninety[- ]ninth\b', '99th'),
+    ]
+    for pat, repl in number_replacements:
+        full_narr = re.sub(pat, repl, full_narr, flags=re.IGNORECASE)
+
     # Temizleme: Kelime arası tireleri boşluğa, uzun tireleri virgüle çevir
     clean_narr = re.sub(r'(\b\w+)\s*[-—]\s*(\w+\b)', r'\1 \2', full_narr)
     clean_narr = clean_narr.replace('—', ' , ').replace('...', ' , ')
@@ -682,14 +797,18 @@ def generate_basketball_subtitles_overlay(
         final_card_dur = max(2.20, round(total_dur - running_sum, 3))
         card_durations.append(final_card_dur)
 
+    running_elapsed = 0.0
     for idx, cdata in enumerate(cards_data):
-        card_img = render_basketball_subtitle_card(cdata["lines"], width=W, height=H, bottom_pos=240, font_size=44)
+        dur = card_durations[idx]
+        # Kategori rozeti SADECE ilk 4.0 saniye görünür (00:00 - 00:04). 4 saniyeden sonra ekrandan tamamen kalkar!
+        curr_badge = category_badge if running_elapsed < 4.0 else ""
+        card_img = render_basketball_subtitle_card(cdata["lines"], width=W, height=H, bottom_pos=240, font_size=44, badge_text=curr_badge)
         card_path = sub_dir / f"card_{idx:03d}.png"
         card_img.save(card_path, "PNG")
         
-        dur = card_durations[idx]
         concat_lines.append(f"file '{card_path.resolve()}'")
         concat_lines.append(f"duration {dur:.3f}")
+        running_elapsed += dur
 
     if cards_data:
         last_card = sub_dir / f"card_{len(cards_data)-1:03d}.png"
@@ -840,6 +959,40 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
             photo_pool.append(target_custom)
             print(f"[SportsEngine] 📸 Özel görsel havuza eklendi: {cp.name}")
 
+    # ── KATI DAMITILMIŞ MATERYAL MANİFESTİ KONTROLÜ (Strict Distilled Manifest) ──
+    strict_materials_only = job_data.get("strict_materials_only", False)
+    approved_manifest_path = job_data.get("approved_manifest_path")
+    if not approved_manifest_path:
+        cand_man = work_dir / "materials" / "approved_manifest.json"
+        if cand_man.exists():
+            approved_manifest_path = str(cand_man)
+
+    if approved_manifest_path and Path(approved_manifest_path).exists():
+        strict_materials_only = True
+        broll_videos = []  # Katı damıtılmış modda sunucudaki un-audited stok videoları sıfırla!
+        try:
+            with open(approved_manifest_path, "r", encoding="utf-8") as f:
+                manifest_obj = json.load(f)
+            approved_dir = Path(approved_manifest_path).parent / "approved"
+            loaded_approved = 0
+            for asset in manifest_obj.get("approved_assets", []):
+                a_type = asset.get("type", "image")
+                a_name = asset.get("name")
+                src_path = approved_dir / a_name if approved_dir.exists() and (approved_dir / a_name).exists() else Path(asset.get("path", ""))
+                if src_path.exists():
+                    if a_type == "video":
+                        if src_path not in broll_videos:
+                            broll_videos.append(src_path)
+                    else:
+                        target_p = photo_pool_dir / f"approved_{len(photo_pool):03d}_{src_path.name}"
+                        format_sports_image(str(src_path), str(target_p), W, H)
+                        if target_p not in photo_pool:
+                            photo_pool.append(target_p)
+                    loaded_approved += 1
+            print(f"[SportsEngine] 💎 [StrictDistilled] Onaylı manifestten {loaded_approved} materyal yüklendi. Açık web aramaları kilitlendi.")
+        except Exception as e_man:
+            print(f"[SportsEngine] Manifest okuma hatası: {e_man}")
+
     # Pre-Render Quality Gate No-Loop Kaydını Sıfırla
     if asset_validator is not None:
         asset_validator.reset_used_assets()
@@ -866,13 +1019,16 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
 
     # ── POZİTİF KÜRASYONLU OYUNCU VE KONU ARŞİVİ ──
     combined_topic = f"{script.get('title', '')} {job_data.get('title', '')} {primary_entity}".lower()
-    athlete_key = None
-    if "fisher" in combined_topic or "0.4" in combined_topic:
-        athlete_key = "derek_fisher"
-    elif "harden" in combined_topic or "step-back" in combined_topic or "deceleration" in combined_topic:
-        athlete_key = "james_harden"
+    athlete_key = job_data.get("athlete_key")
+    if not athlete_key:
+        if "jokic" in combined_topic or "sombor" in combined_topic or "denver" in combined_topic:
+            athlete_key = "nikola_jokic"
+        elif "fisher" in combined_topic or "0.4" in combined_topic:
+            athlete_key = "derek_fisher"
+        elif "harden" in combined_topic or "step-back" in combined_topic or "deceleration" in combined_topic:
+            athlete_key = "james_harden"
 
-    if athlete_key:
+    if not strict_materials_only and athlete_key:
         athlete_dir = curated_sports_dir / "athletes" / athlete_key
         if athlete_dir.exists():
             curated_imgs = sorted([p for p in athlete_dir.glob("photo_*.jpg") if p.stat().st_size > 10000])
@@ -900,6 +1056,8 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
                         should_add = True
                     elif athlete_key == "james_harden" and any(k in b_name for k in ["harden", "quad", "mocap", "friction", "shoes", "swish", "ankle", "stepback"]):
                         should_add = True
+                    elif athlete_key == "nikola_jokic" and any(k in b_name for k in ["jokic", "sombor", "mocap", "biomechanic", "swish", "arena", "parabolic", "science"]):
+                        should_add = True
 
                     if should_add:
                         target_b = photo_pool_dir / f"curated_broll_{b_img.name}"
@@ -914,11 +1072,13 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
     # ── B & C) ÇOKLU SORGU GENİŞLETMESİ & MİNİMUM 25+ ONAYLI NBA MAÇ GÖRSELİ HAVUZU ──
     estimated_cuts = max(8, int(math.ceil(total_dur / 2.20)))
     target_photo_count = max(25, estimated_cuts + 3)
-    if len(photo_pool) >= 12:
+    if strict_materials_only:
+        print(f"[SportsEngine] 🔒 [StrictDistilled] Katı materyal modu devrede ({len(photo_pool)} onaylı görsel, {len(broll_videos)} klip). Web aramaları kilitlendi.")
+    elif len(photo_pool) >= 12:
         print(f"[SportsEngine] 💎 Pozitif havuz tam kapasite ({len(photo_pool)} onaylı görsel). Web araması atlandı, %100 onaylı arşiv kilitlendi.")
     else:
         print(f"[SportsEngine] 🔍 Çoklu-sorgu genişletmesi (Multi-Query Expansion) ve SigLIP doğrulama başlatılıyor (Hedef: En az {target_photo_count} görsel)...")
-    if len(photo_pool) < target_photo_count and asset_fetcher is not None:
+    if not strict_materials_only and len(photo_pool) < target_photo_count and asset_fetcher is not None:
         detected_year = query_builder.extract_year(str(script)) if query_builder is not None else None
         opp_ent = None
         if query_builder is not None:
@@ -944,7 +1104,7 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
                 photo_pool.append(fp)
 
     # İkincil Güvenlik Katmanı: Havuz target_photo_count altındaysa yedek sorgularla tamamla
-    if len(photo_pool) < target_photo_count:
+    if not strict_materials_only and len(photo_pool) < target_photo_count:
         for s_idx, sc in enumerate(scenes):
             if len(photo_pool) >= target_photo_count:
                 break
@@ -1094,6 +1254,7 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
     reg_photo_idx = 0
     vid_idx = 0
     used_photo_set = set()
+    used_broll_set = set()
 
     print(f"[SportsEngine] 🎬 Ritmik Hibrit Jump-Cut Kurgusu başlatılıyor: Toplam {total_cuts} kesme ({actual_cut_len:.2f}s/kesme)...")
 
@@ -1132,12 +1293,16 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
         video_done = False
 
         if use_video and broll_videos:
-            chosen_broll = broll_videos[vid_idx % len(broll_videos)]
-            vid_idx += 1
-            offset = 1.0 + ((cut_i * 1.6) % 5.0)
-            video_done = extract_sports_video_cut(chosen_broll, out_clip, actual_cut_len, start_offset=offset, W=W, H=H, fps=fps)
-            if video_done:
-                print(f"[SportsEngine] 🎬 [Hybrid Video] cut_{cut_i:03d} -> {chosen_broll.name} (offset: {offset:.1f}s)")
+            available_brolls = [b for b in broll_videos if b not in used_broll_set]
+            if available_brolls:
+                chosen_broll = available_brolls[0]
+                used_broll_set.add(chosen_broll)
+                offset = 1.0 + ((cut_i * 1.6) % 5.0)
+                video_done = extract_sports_video_cut(chosen_broll, out_clip, actual_cut_len, start_offset=offset, W=W, H=H, fps=fps)
+                if video_done:
+                    print(f"[SportsEngine] 🎬 [Hybrid Video] cut_{cut_i:03d} -> {chosen_broll.name} (offset: {offset:.1f}s)")
+            else:
+                use_video = False
 
         if not video_done:
             chosen_photo = None
@@ -1154,13 +1319,20 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
 
             # Eğer fotoğraf havuzu tükenirse kalan b-roll videolarından birini video olarak koy (ASLA döngüye girme!)
             if chosen_photo is None and broll_videos:
-                chosen_broll = broll_videos[vid_idx % len(broll_videos)]
-                vid_idx += 1
-                offset = 0.5 + ((cut_i * 2.0) % 6.0)
-                video_done = extract_sports_video_cut(chosen_broll, out_clip, actual_cut_len, start_offset=offset, W=W, H=H, fps=fps)
-                if video_done:
-                    print(f"[SportsEngine] 🎬 [Fallback Video] cut_{cut_i:03d} -> {chosen_broll.name}")
-                    continue
+                available_brolls = [b for b in broll_videos if b not in used_broll_set]
+                if available_brolls:
+                    chosen_broll = available_brolls[0]
+                    used_broll_set.add(chosen_broll)
+                    offset = 0.5 + ((cut_i * 2.0) % 6.0)
+                    video_done = extract_sports_video_cut(chosen_broll, out_clip, actual_cut_len, start_offset=offset, W=W, H=H, fps=fps)
+                    if video_done:
+                        print(f"[SportsEngine] 🎬 [Fallback Video] cut_{cut_i:03d} -> {chosen_broll.name}")
+                        continue
+
+            # Katı Damıtılmış Materyal Modunda: Görseller tükense bile soyut doku yerine onaylı gerçek fotoğrafların dinamik kamera açısı rotasyonunu kullan
+            if chosen_photo is None and strict_materials_only and regular_photos:
+                chosen_photo = regular_photos[cut_i % len(regular_photos)]
+                print(f"[SportsEngine] 🔁 [StrictDistilled] Onaylı sporcu fotoğrafı dinamik açıyla tekrarlandı: {chosen_photo.name} (cut_{cut_i:03d})")
 
             if chosen_photo is None:
                 # Havuz tükendiğinde veya tüm görseller kullanıldığında ASLA eski fotoğraflara başa sarılmaz!
@@ -1233,8 +1405,10 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
                 "-an", str(out_clip)
             ]
             subprocess.run(cmd, capture_output=True, check=True)
-        elif broll_videos:
-            extract_sports_video_cut(broll_videos[0], out_clip, actual_cut_len, start_offset=0.5, W=W, H=H, fps=fps)
+        elif [b for b in broll_videos if b not in used_broll_set]:
+            avail = [b for b in broll_videos if b not in used_broll_set]
+            used_broll_set.add(avail[0])
+            extract_sports_video_cut(avail[0], out_clip, actual_cut_len, start_offset=0.5, W=W, H=H, fps=fps)
         else:
             # SIFIR SİYAH EKRAN: Asla düz siyah zemin basılmaz!
             if fallback_engine is not None:
@@ -1280,7 +1454,7 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
     ], capture_output=True, check=True)
 
     # 5. Dinamik Altyazı Kartları (Referans Video Estetiği: Altın Çerçeveli Glassmorphism Kart)
-    sub_concat_file = generate_basketball_subtitles_overlay(script, total_dur, scratch_dir, W=W, H=H)
+    sub_concat_file = generate_basketball_subtitles_overlay(script, total_dur, scratch_dir, W=W, H=H, work_dir=work_dir)
 
     # 6. Hip-hop Arka Plan Müziği ve Final Miks
     base_assets = Path(__file__).resolve().parent.parent / "assets"

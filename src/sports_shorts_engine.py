@@ -397,6 +397,51 @@ def extract_sports_video_cut(
 def format_sports_image(src_path: str, dst_path: str, target_w: int = 1080, target_h: int = 1920):
     """Görseli 9:16 oranına akıllı crop edip taranmış kenarlıkları yok eder ve sinematik kontrast/keskinlik ekler."""
     try:
+        # Özne (yüz/kafa) merkezli akıllı 9:16 kırpma (Headless crop engelleme)
+        src_p = Path(src_path)
+        dst_p = Path(dst_path)
+        try:
+            import cv2
+            img_bgr = cv2.imread(str(src_p))
+            if img_bgr is not None:
+                h, w = img_bgr.shape[:2]
+                target_ratio = target_w / target_h
+                current_ratio = w / h
+                if abs(current_ratio - target_ratio) > 0.02 or w < 720 or h < 1280:
+                    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+                    profile_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
+                    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                    faces = list(face_cascade.detectMultiScale(gray, 1.1, 4))
+                    if not faces:
+                        faces = list(profile_cascade.detectMultiScale(gray, 1.1, 4))
+                    if faces:
+                        faces.sort(key=lambda f: f[2] * f[3], reverse=True)
+                        fx, fy, fw, fh = faces[0]
+                        face_cx = fx + fw // 2
+                        face_cy = fy + fh // 2
+                    else:
+                        face_cx = w // 2
+                        face_cy = int(h * 0.35)
+                    if current_ratio > target_ratio:
+                        crop_h = h
+                        crop_w = int(crop_h * target_ratio)
+                        crop_x = int(face_cx - crop_w / 2)
+                        crop_x = max(0, min(w - crop_w, crop_x))
+                        crop_y = 0
+                    else:
+                        crop_w = w
+                        crop_h = int(crop_w / target_ratio)
+                        crop_y = int(face_cy - crop_h * 0.28)
+                        crop_y = max(0, min(h - crop_h, crop_y))
+                        crop_x = 0
+                    cropped = img_bgr[crop_y:crop_y + crop_h, crop_x:crop_x + crop_w]
+                    resized = cv2.resize(cropped, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
+                    dst_p.parent.mkdir(parents=True, exist_ok=True)
+                    cv2.imwrite(str(dst_p), resized, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                    return
+        except Exception as cv_e:
+            pass
+
         im = Image.open(src_path).convert("RGB")
         src_w, src_h = im.size
         src_ratio = src_w / src_h
@@ -474,7 +519,7 @@ def render_basketball_subtitle_card(
     height: int = 1920,
     bottom_pos: int = 240,
     font_size: int = 44,
-    badge_text: str = "🏀 SPORTS SCIENCE"
+    badge_text: str = ""
 ) -> Image.Image:
     """
     Kullanıcının referans videosundaki (/Users/alienes/Downloads/The Weirdest Triple-Double...)
@@ -484,7 +529,7 @@ def render_basketball_subtitle_card(
     - 24px yuvarlatılmış köşeler
     - Çift renkli tipografi (İstatistikler/İsimler altın sarısı, diğer kelimeler beyaz)
     - Ekranın altından 240px yukarıda ortalanmış
-    - Üstte sabit 'SPORTS SCIENCE' kategori rozeti (top safe area)
+    - Üstte sabit 'SPORTS SCIENCE' kategori rozeti (top safe area, sadece ilk 4s)
     - SIFIR TAŞMA GARANTİSİ: Satır genişliği 800px ile sınırlandırılır, uzun satırlar otomatik alt satıra kaydırılır.
     """
     font = get_bold_font(font_size)
@@ -492,9 +537,11 @@ def render_basketball_subtitle_card(
     draw = ImageDraw.Draw(canvas)
 
     # ── ÜST KATEGORİ ROZETİ (TOP CATEGORY PILL) ──
-    if badge_text:
+    # Emoji temizleme (kırık glif □ çıkmasını kesinlikle engelle)
+    clean_badge = badge_text.replace("🏀", "").replace("□", "").strip() if badge_text else ""
+    if clean_badge:
         badge_font = get_bold_font(28)
-        b_bbox = draw.textbbox((0, 0), badge_text, font=badge_font)
+        b_bbox = draw.textbbox((0, 0), clean_badge, font=badge_font)
         b_tw = b_bbox[2] - b_bbox[0]
         b_th = b_bbox[3] - b_bbox[1]
         b_pad_x = 32
@@ -509,7 +556,7 @@ def render_basketball_subtitle_card(
         draw.rounded_rectangle([b_x0, b_y0 + 4, b_x1, b_y1 + 4], radius=22, fill=(0, 0, 0, 110))
         # Kapsül gövdesi ve altın çerçeve
         draw.rounded_rectangle([b_x0, b_y0, b_x1, b_y1], radius=22, fill=(18, 22, 34, 230), outline=(251, 191, 36, 255), width=2)
-        draw.text((b_x0 + b_pad_x, b_y0 + b_pad_y - 2), badge_text, font=badge_font, fill="#fbbf24")
+        draw.text((b_x0 + b_pad_x, b_y0 + b_pad_y - 2), clean_badge, font=badge_font, fill="#fbbf24")
 
     # 1. Aşama: Satırları piksel genişliğine göre katı bir şekilde kaydır (Wrap)
     # Maksimum metin satırı genişliği: 800px (1080px genişlikte her iki taraftan 140px güvenlik marjı)
@@ -600,7 +647,7 @@ def generate_basketball_subtitles_overlay(
     W: int = 1080,
     H: int = 1920,
     work_dir: Optional[Path] = None,
-    category_badge: str = "🏀 SPORTS SCIENCE"
+    category_badge: str = "SPORTS SCIENCE"
 ) -> Path:
     """
     Tüm anlatımı 2-4 kelimelik vurucu Shorts altyazı kartlarına böler.
@@ -650,8 +697,10 @@ def generate_basketball_subtitles_overlay(
 
     full_narr = " ".join(raw_texts)
 
-    # Sayı ifadelerini ve yüzdeleri rakamsal formatla ("zero point two" -> "0.2s", "ninety ninth" -> "99th")
+    # Sayı ifadelerini ve yüzdeleri rakamsal formatla ("zero point two" -> "0.2s", "ninety ninth" -> "99th", "fifty five-degree" -> "55-degree")
     number_replacements = [
+        (r'\bfifty[\s-]five[\s-]degree(s)?\b', '55-degree'),
+        (r'\bfifty[\s-]five\b', '55'),
         (r'\bzero point two\b', '0.2s'),
         (r'\bzero point three\b', '0.3s'),
         (r'\bzero point four\b', '0.4s'),
@@ -748,14 +797,18 @@ def generate_basketball_subtitles_overlay(
         final_card_dur = max(2.20, round(total_dur - running_sum, 3))
         card_durations.append(final_card_dur)
 
+    running_elapsed = 0.0
     for idx, cdata in enumerate(cards_data):
-        card_img = render_basketball_subtitle_card(cdata["lines"], width=W, height=H, bottom_pos=240, font_size=44, badge_text=category_badge)
+        dur = card_durations[idx]
+        # Kategori rozeti SADECE ilk 4.0 saniye görünür (00:00 - 00:04). 4 saniyeden sonra ekrandan tamamen kalkar!
+        curr_badge = category_badge if running_elapsed < 4.0 else ""
+        card_img = render_basketball_subtitle_card(cdata["lines"], width=W, height=H, bottom_pos=240, font_size=44, badge_text=curr_badge)
         card_path = sub_dir / f"card_{idx:03d}.png"
         card_img.save(card_path, "PNG")
         
-        dur = card_durations[idx]
         concat_lines.append(f"file '{card_path.resolve()}'")
         concat_lines.append(f"duration {dur:.3f}")
+        running_elapsed += dur
 
     if cards_data:
         last_card = sub_dir / f"card_{len(cards_data)-1:03d}.png"
@@ -966,11 +1019,14 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
 
     # ── POZİTİF KÜRASYONLU OYUNCU VE KONU ARŞİVİ ──
     combined_topic = f"{script.get('title', '')} {job_data.get('title', '')} {primary_entity}".lower()
-    athlete_key = None
-    if "fisher" in combined_topic or "0.4" in combined_topic:
-        athlete_key = "derek_fisher"
-    elif "harden" in combined_topic or "step-back" in combined_topic or "deceleration" in combined_topic:
-        athlete_key = "james_harden"
+    athlete_key = job_data.get("athlete_key")
+    if not athlete_key:
+        if "jokic" in combined_topic or "sombor" in combined_topic or "denver" in combined_topic:
+            athlete_key = "nikola_jokic"
+        elif "fisher" in combined_topic or "0.4" in combined_topic:
+            athlete_key = "derek_fisher"
+        elif "harden" in combined_topic or "step-back" in combined_topic or "deceleration" in combined_topic:
+            athlete_key = "james_harden"
 
     if not strict_materials_only and athlete_key:
         athlete_dir = curated_sports_dir / "athletes" / athlete_key
@@ -999,6 +1055,8 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
                     if athlete_key == "derek_fisher" and any(k in b_name for k in ["fisher", "sbc", "clock", "trent", "pupil", "cortex", "synapse", "referee", "arena"]):
                         should_add = True
                     elif athlete_key == "james_harden" and any(k in b_name for k in ["harden", "quad", "mocap", "friction", "shoes", "swish", "ankle", "stepback"]):
+                        should_add = True
+                    elif athlete_key == "nikola_jokic" and any(k in b_name for k in ["jokic", "sombor", "mocap", "biomechanic", "swish", "arena", "parabolic", "science"]):
                         should_add = True
 
                     if should_add:
@@ -1196,6 +1254,7 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
     reg_photo_idx = 0
     vid_idx = 0
     used_photo_set = set()
+    used_broll_set = set()
 
     print(f"[SportsEngine] 🎬 Ritmik Hibrit Jump-Cut Kurgusu başlatılıyor: Toplam {total_cuts} kesme ({actual_cut_len:.2f}s/kesme)...")
 
@@ -1234,12 +1293,16 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
         video_done = False
 
         if use_video and broll_videos:
-            chosen_broll = broll_videos[vid_idx % len(broll_videos)]
-            vid_idx += 1
-            offset = 1.0 + ((cut_i * 1.6) % 5.0)
-            video_done = extract_sports_video_cut(chosen_broll, out_clip, actual_cut_len, start_offset=offset, W=W, H=H, fps=fps)
-            if video_done:
-                print(f"[SportsEngine] 🎬 [Hybrid Video] cut_{cut_i:03d} -> {chosen_broll.name} (offset: {offset:.1f}s)")
+            available_brolls = [b for b in broll_videos if b not in used_broll_set]
+            if available_brolls:
+                chosen_broll = available_brolls[0]
+                used_broll_set.add(chosen_broll)
+                offset = 1.0 + ((cut_i * 1.6) % 5.0)
+                video_done = extract_sports_video_cut(chosen_broll, out_clip, actual_cut_len, start_offset=offset, W=W, H=H, fps=fps)
+                if video_done:
+                    print(f"[SportsEngine] 🎬 [Hybrid Video] cut_{cut_i:03d} -> {chosen_broll.name} (offset: {offset:.1f}s)")
+            else:
+                use_video = False
 
         if not video_done:
             chosen_photo = None
@@ -1256,13 +1319,15 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
 
             # Eğer fotoğraf havuzu tükenirse kalan b-roll videolarından birini video olarak koy (ASLA döngüye girme!)
             if chosen_photo is None and broll_videos:
-                chosen_broll = broll_videos[vid_idx % len(broll_videos)]
-                vid_idx += 1
-                offset = 0.5 + ((cut_i * 2.0) % 6.0)
-                video_done = extract_sports_video_cut(chosen_broll, out_clip, actual_cut_len, start_offset=offset, W=W, H=H, fps=fps)
-                if video_done:
-                    print(f"[SportsEngine] 🎬 [Fallback Video] cut_{cut_i:03d} -> {chosen_broll.name}")
-                    continue
+                available_brolls = [b for b in broll_videos if b not in used_broll_set]
+                if available_brolls:
+                    chosen_broll = available_brolls[0]
+                    used_broll_set.add(chosen_broll)
+                    offset = 0.5 + ((cut_i * 2.0) % 6.0)
+                    video_done = extract_sports_video_cut(chosen_broll, out_clip, actual_cut_len, start_offset=offset, W=W, H=H, fps=fps)
+                    if video_done:
+                        print(f"[SportsEngine] 🎬 [Fallback Video] cut_{cut_i:03d} -> {chosen_broll.name}")
+                        continue
 
             # Katı Damıtılmış Materyal Modunda: Görseller tükense bile soyut doku yerine onaylı gerçek fotoğrafların dinamik kamera açısı rotasyonunu kullan
             if chosen_photo is None and strict_materials_only and regular_photos:
@@ -1340,8 +1405,10 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
                 "-an", str(out_clip)
             ]
             subprocess.run(cmd, capture_output=True, check=True)
-        elif broll_videos:
-            extract_sports_video_cut(broll_videos[0], out_clip, actual_cut_len, start_offset=0.5, W=W, H=H, fps=fps)
+        elif [b for b in broll_videos if b not in used_broll_set]:
+            avail = [b for b in broll_videos if b not in used_broll_set]
+            used_broll_set.add(avail[0])
+            extract_sports_video_cut(avail[0], out_clip, actual_cut_len, start_offset=0.5, W=W, H=H, fps=fps)
         else:
             # SIFIR SİYAH EKRAN: Asla düz siyah zemin basılmaz!
             if fallback_engine is not None:
