@@ -307,7 +307,11 @@ class BasketballOrchestrator:
         for ed in extra_dirs:
             if ed.exists():
                 for p_file in sorted(ed.glob("*.jpg")):
+                    if is_source_banned_for_project(p_file.name, athlete_key) or is_source_banned_for_project(str(p_file), athlete_key):
+                        continue
                     p_sid = f"broll_img_{p_file.stem}"
+                    if is_source_banned_for_project(p_sid, athlete_key):
+                        continue
                     if p_sid not in locked_source_ids:
                         dest_crop = work_dir / "photos" / f"requery_{p_file.name}"
                         dest_crop.parent.mkdir(parents=True, exist_ok=True)
@@ -331,7 +335,11 @@ class BasketballOrchestrator:
         # Seviye 2: Küratörlü 1080p B-roll havuzu
         if CURATED_BROLL_DIR.exists():
             for b_file in sorted(CURATED_BROLL_DIR.glob("*.mp4")):
+                if is_source_banned_for_project(b_file.name, athlete_key) or is_source_banned_for_project(str(b_file), athlete_key):
+                    continue
                 b_sid = f"src_broll_{b_file.stem}"
+                if is_source_banned_for_project(b_sid, athlete_key):
+                    continue
                 if b_sid in locked_source_ids or (locked_file_names and b_file.name in locked_file_names):
                     continue
                 b_hash = compute_file_md5(b_file)

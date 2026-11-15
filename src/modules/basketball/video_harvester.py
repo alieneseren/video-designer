@@ -119,6 +119,16 @@ def smart_crop_9_16_image(src_path: Path, dest_path: Path, target_w: int = 1080,
         logger.warning(f"⚠️ smart_crop_9_16_image hatası ({src_path.name}): {e}")
         return False
 
+BANNED_CONTENT_HASHES = {
+    # 2004 Spurs / SBC Center photo and variants
+    "e6db95cb8a83be2861c8c0077ca6913c",
+    "b629f7131b74704bbf6bb8c40fffa817",
+    "39007c7cb638a16aa475eb3c78ad80d6",
+    "7d53413c69c6cf8fa5e347c61f2f8149",
+    "997e295ea9a6cf71694fcaab7a518fb1",
+}
+
+
 def is_source_banned_for_project(source_id_or_path: str, athlete_key: str) -> bool:
     """Enforces strict cross-project asset isolation."""
     if not athlete_key or not source_id_or_path:
@@ -149,6 +159,16 @@ def is_source_banned_for_project(source_id_or_path: str, athlete_key: str) -> bo
         jokic_banned = ["spurs", "fisher", "derek", "sbc_center", "2004_playoffs", "lakers_vs_spurs", "san_antonio", "durant", "torrey_craig", "warriors"]
         if any(term in src_str for term in jokic_banned):
             return True
+
+    # Dosya içeriği MD5 hash kontrolü ile sızıntı engeli (BANNED_CONTENT_HASHES)
+    try:
+        cand_p = Path(source_id_or_path)
+        if cand_p.exists() and cand_p.is_file():
+            cand_hash = compute_file_md5(cand_p)
+            if cand_hash in BANNED_CONTENT_HASHES and "fisher" not in key:
+                return True
+    except Exception:
+        pass
 
     for proj_key, banned_terms in BANNED_PROJECT_SOURCES.items():
         if proj_key in key or key in proj_key:
@@ -380,7 +400,7 @@ def get_storyboard_for_athlete(athlete_key: str, topic: str = "") -> List[Tuple[
         ("video", f"{athlete_key}_clutch_shot", f"{clean_name} clutch scoring shot basketball action in NBA game"),
         ("image", f"{athlete_key}_photo_05_jump_shot", f"{clean_name} elevated jump shot release over defender on court"),
         ("video", f"{athlete_key}_defense_read", "NBA defender mirroring and guarding drive to rim on hardwood court"),
-        ("image", f"{athlete_key}_photo_06_crowd", "authentic NBA basketball arena crowd spectators in stadium stands"),
+        ("image", f"{athlete_key}_photo_06_crowd", f"{clean_name} celebrating with Denver Nuggets crowd in Ball Arena" if "jokic" in athlete_key else f"{clean_name} celebrating with home arena crowd spectators"),
         ("video", f"{athlete_key}_post_play", f"{clean_name} post up footwork and turnaround shot on NBA court"),
         ("image", f"{athlete_key}_photo_07_ball_handling", f"{clean_name} dribbling basketball on NBA hardwood court"),
         ("image", f"{athlete_key}_photo_08_intensity", f"{clean_name} intense game action on NBA basketball court"),
@@ -476,7 +496,7 @@ class VideoHarvester:
             (f"{clean_name} top 10 plays NBA HD", f"{athlete_key}_top_plays"),
             (f"{clean_name} playoff highlights NBA HD", f"{athlete_key}_playoffs"),
             (f"{clean_name} buzzer beater game winner NBA HD", f"{athlete_key}_buzzer_beater"),
-            (f"{clean_name} Olympic basketball Serbia highlights HD", f"{athlete_key}_olympics"),
+            (f"{clean_name} Denver Nuggets clutch game winner NBA HD", f"{athlete_key}_clutch_gamewinner"),
         ]
         start_idx = len(video_items)
         for e_idx, (e_query, e_label) in enumerate(extra_dyn_queries):
