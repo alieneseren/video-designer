@@ -211,7 +211,7 @@ export const RemotionRoot: React.FC = () => {
         }}
         defaultProps={{
           topic: "NBA Sports Science",
-          categoryBadgeText: "🏀 SPORTS SCIENCE",
+          categoryBadgeText: "SPORTS SCIENCE",
           badgeDurationFrames: 120,
           audioPath: "",
           cuts: [],

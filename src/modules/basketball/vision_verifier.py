@@ -35,6 +35,9 @@ NEGATIVE_DOMAIN_LABELS = [
     "empty basketball gym wall or floor without players",
     "close up sneakers on floor",
     "outdoor asphalt streetball court",
+    "outdoor painted concrete basketball court",
+    "outdoor streetball court",
+    "close up sneakers on outdoor court",
     "football or soccer stadium",
     "athletics running track",
     "players standing on bench dead ball",
@@ -363,6 +366,9 @@ class BasketballVisionVerifier:
                 "empty basketball gym wall or floor without players",
                 "close up sneakers on floor",
                 "outdoor asphalt streetball court",
+                "outdoor painted concrete basketball court",
+                "outdoor streetball court",
+                "close up sneakers on outdoor court",
                 "football or soccer stadium",
                 "athletics running track",
                 "heavy motion blur whip pan",
@@ -372,10 +378,10 @@ class BasketballVisionVerifier:
             }
             is_domain_wall = max_neg_label in DOMAIN_AND_WALL_LABELS
             if is_domain_wall:
-                if max_neg_sim >= 0.245 or max_neg_sim > (pos_anchor_threshold - 0.02):
+                if max_neg_sim >= 0.24 or max_neg_sim > (pos_anchor_threshold - 0.02):
                     result["passed"] = False
                     result["reasons"].append(
-                        f"🚨 [Negatif Domain Kilidi @ {ts}s] '{max_neg_label}' skoru ({max_neg_sim:.3f}) >= 0.245 veya > "
+                        f"🚨 [Negatif Domain Kilidi @ {ts}s] '{max_neg_label}' skoru ({max_neg_sim:.3f}) >= 0.240 veya > "
                         f"(Pozitif çapa {pos_anchor_threshold:.3f} - 0.02)"
                     )
             else:

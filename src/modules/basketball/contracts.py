@@ -45,7 +45,7 @@ class BasketballRenderSpec:
     audio_path: str
     sentence_boundaries: List[Dict[str, Any]]
     cuts: List[BasketballCut]
-    category_badge_text: str = "🏀 SPORTS SCIENCE"
+    category_badge_text: str = "SPORTS SCIENCE"
     category_badge_duration: float = 4.0  # Tam 4. saniyede fade-out ile kaybolur
     cta_display_duration: float = 2.0
 

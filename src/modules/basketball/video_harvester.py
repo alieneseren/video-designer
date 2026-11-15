@@ -18,7 +18,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional, Set
 import cv2
 
 from src.modules.basketball.vision_verifier import BasketballVisionVerifier
@@ -27,9 +27,10 @@ from src.modules.basketball.asset_validator import measure_laplacian_sharpness, 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [%(levelname)s] %(message)s")
 logger = logging.getLogger("BasketballHarvester")
 
+PROJECT_ROOT = Path("/Users/alienes/yt-oto-video/files")
 YT_DLP_BIN = "/opt/homebrew/bin/yt-dlp"
 FFMPEG_BIN = "ffmpeg"
-CURATED_BROLL_DIR = Path("/Users/alienes/yt-oto-video/files/assets/curated_sports/b_roll/videos")
+CURATED_BROLL_DIR = PROJECT_ROOT / "assets" / "curated_sports" / "b_roll" / "videos"
 
 BANNED_PROJECT_SOURCES = {
     "james_harden": [
@@ -274,6 +275,39 @@ STORYBOARD_DEFINITIONS = {
 }
 
 
+def get_storyboard_for_athlete(athlete_key: str, topic: str = "") -> List[Tuple[str, str, str]]:
+    """Dinamik veya önceden tanımlı storyboard listesini döndürür (23 kesme: 9 video, 14 görsel)."""
+    if athlete_key in STORYBOARD_DEFINITIONS:
+        return STORYBOARD_DEFINITIONS[athlete_key]
+
+    clean_name = athlete_key.replace("_", " ").title()
+    return [
+        ("video", f"{athlete_key}_mocap_analysis", "scientific 3D wireframe motion capture animation of basketball athlete in laboratory"),
+        ("image", f"{athlete_key}_photo_00_biomechanics", "sports science biomechanics telemetry analysis on court"),
+        ("image", f"{athlete_key}_photo_01_portrait", f"{clean_name} focused intense facial expression on basketball court"),
+        ("video", f"{athlete_key}_dribble_drive", f"{clean_name} explosive crossover dribble drive to the rim on NBA hardwood court"),
+        ("image", f"{athlete_key}_photo_02_action_drive", f"{clean_name} playing basketball in uniform attacking rim on hardwood court"),
+        ("video", f"{athlete_key}_sprint_transition", f"{clean_name} running fast transition full court NBA arena hardwood broadcast HD"),
+        ("image", f"{athlete_key}_photo_03_footwork", "close up basketball player leg muscles and footwork on hardwood court"),
+        ("video", f"{athlete_key}_signature_move", f"{clean_name} signature scoring move basketball action in NBA game"),
+        ("image", f"{athlete_key}_photo_04_court_vision", f"{clean_name} elite court vision passing basketball on NBA court"),
+        ("video", f"{athlete_key}_clutch_shot", f"{clean_name} clutch scoring shot basketball action in NBA game"),
+        ("image", f"{athlete_key}_photo_05_jump_shot", f"{clean_name} elevated jump shot release over defender on court"),
+        ("video", f"{athlete_key}_defense_read", "NBA defender mirroring and guarding drive to rim on hardwood court"),
+        ("image", f"{athlete_key}_photo_06_crowd", "authentic NBA basketball arena crowd spectators in stadium stands"),
+        ("video", f"{athlete_key}_post_play", f"{clean_name} post up footwork and turnaround shot on NBA court"),
+        ("image", f"{athlete_key}_photo_07_ball_handling", f"{clean_name} dribbling basketball on NBA hardwood court"),
+        ("image", f"{athlete_key}_photo_08_intensity", f"{clean_name} intense game action on NBA basketball court"),
+        ("image", f"{athlete_key}_photo_09_action_focus", f"{clean_name} playing basketball in uniform on hardwood court"),
+        ("video", f"{athlete_key}_highlight_assist", f"{clean_name} highlight assist pass or scoring play in NBA game"),
+        ("image", f"{athlete_key}_photo_10_celebration", f"{clean_name} celebrating victory with teammates on court"),
+        ("video", f"{athlete_key}_swish_net", "basketball jump shot swishing through basketball net on hoop"),
+        ("image", f"{athlete_key}_photo_11_synapse", "3D glowing brain nervous system neural synapse impulse firing animation in laboratory"),
+        ("image", f"{athlete_key}_photo_12_telemetry", "scientific sports biomechanics laboratory motion analysis"),
+        ("image", f"{athlete_key}_photo_13_solo_outro", f"{clean_name} portrait smiling proudly after winning basketball game")
+    ]
+
+
 class VideoHarvester:
     def __init__(self, work_dir: Path, bypass_cache: bool = False, project_id: str = ""):
         self.work_dir = Path(work_dir)
@@ -302,9 +336,62 @@ class VideoHarvester:
         self.photos_dir.mkdir(parents=True, exist_ok=True)
         self.vision_verifier = BasketballVisionVerifier()
 
+    def get_athlete_video_sources(self, athlete_key: str) -> List[Dict[str, Any]]:
+        """Sporcu için sabit veya dinamik video kaynak listesini döndürür."""
+        if athlete_key in VIDEO_SOURCES and len(VIDEO_SOURCES[athlete_key]) >= 6:
+            return VIDEO_SOURCES[athlete_key]
+
+        if hasattr(self, "_dynamic_sources") and athlete_key in self._dynamic_sources:
+            return self._dynamic_sources[athlete_key]
+
+        sb = get_storyboard_for_athlete(athlete_key)
+        clean_name = athlete_key.replace("_", " ").title()
+        dyn_sources = []
+
+        video_items = [item for item in sb if item[0] == "video"]
+        for idx, (_, clip_label, concrete_query) in enumerate(video_items):
+            c_lower = concrete_query.lower()
+            l_lower = clip_label.lower()
+            if any(k in c_lower or k in l_lower for k in ["mocap", "wireframe", "laboratory", "sport_science"]):
+                search_q = "ESPN Sport Science wireframe basketball"
+            elif any(k in c_lower or k in l_lower for k in ["brain", "synapse", "neural"]):
+                search_q = "scientific 3D animation neurology impulses visual cortex visual"
+            elif any(k in c_lower or k in l_lower for k in ["swish", "net"]):
+                search_q = "basketball swish through net slow motion NBA"
+            elif any(k in c_lower or k in l_lower for k in ["defense", "mirroring"]):
+                search_q = "NBA basketball defense pick and roll highlights broadcast HD"
+            elif any(k in c_lower or k in l_lower for k in ["clutch", "buzzer", "winner"]):
+                search_q = f"{clean_name} clutch game winner shot NBA HD"
+            elif any(k in c_lower or k in l_lower for k in ["assist", "pass"]):
+                search_q = f"{clean_name} best passes assists NBA HD"
+            elif any(k in c_lower or k in l_lower for k in ["post", "pivot"]):
+                search_q = f"{clean_name} post moves highlights NBA HD"
+            elif any(k in c_lower or k in l_lower for k in ["sprint", "transition"]):
+                search_q = f"{clean_name} fastbreak sprint assist NBA game HD"
+            else:
+                action_words = clip_label.replace(athlete_key, "").replace("_", " ").strip()
+                search_q = f"{clean_name} {action_words or 'highlights'} NBA game HD"
+
+            fname = f"dyn_{athlete_key}_{idx:02d}_{clip_label}.mp4"
+            dyn_sources.append({
+                "url": f"ytsearch1:{search_q}",
+                "format": "bestvideo[height<=720][ext=mp4]/bestvideo[height<=720]/best",
+                "sections": "*00:10-00:25",
+                "filename": fname,
+                "source_id": f"src_dyn_{athlete_key}_{idx:02d}_{clip_label}",
+                "clips": [
+                    ("00:00:02.0", 2.0, clip_label)
+                ]
+            })
+
+        if not hasattr(self, "_dynamic_sources"):
+            self._dynamic_sources = {}
+        self._dynamic_sources[athlete_key] = dyn_sources
+        return dyn_sources
+
     def download_recipe_videos(self, athlete_key: str) -> Dict[str, Path]:
-        """Tarife listesindeki videoları yt-dlp ile 720p+ ve netlik filtresiyle indirir."""
-        sources = VIDEO_SOURCES.get(athlete_key, [])
+        """Tarife listesindeki veya dinamik aramadaki videoları yt-dlp ile 720p+ indirir."""
+        sources = self.get_athlete_video_sources(athlete_key)
         downloaded = {}
 
         for src in sources:
@@ -330,7 +417,7 @@ class VideoHarvester:
                 downloaded[fname] = out_file
                 continue
 
-            logger.info(f"📥 [yt-dlp] {src['url']} ({src['sections']}) indiriliyor -> {fname}...")
+            logger.info(f"📥 [yt-dlp Dynamic/Recipe] {src['url']} ({src['sections']}) indiriliyor -> {fname}...")
             cmd = [
                 YT_DLP_BIN,
                 src["url"],
@@ -361,7 +448,7 @@ class VideoHarvester:
         - Her dilim kesildikten sonra t=1.0s orta karesi SigLIP/CLIP ve Laplacian (>=75.0) filtresinden geçer.
         - Negatif etiketler (bench standing dead-ball, brick wall gym, motion blur) tespit edilirse dilim montaja girmeden elenir.
         """
-        sources = VIDEO_SOURCES.get(athlete_key, [])
+        sources = self.get_athlete_video_sources(athlete_key)
         clips_meta = []
         clip_counter = 0
         seen_source_ids = set()
@@ -388,36 +475,42 @@ class VideoHarvester:
             for start_ts, duration, clip_label in src["clips"]:
                 if source_id in seen_source_ids or (canonical_id and canonical_id in seen_canonical_ids):
                     break
-                out_clip = self.clips_dir / f"clip_{clip_counter:03d}_{clip_label}.mp4"
                 
-                vf = (
-                    "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,"
-                    "crop=1080:1920,"
-                    "unsharp=5:5:1.2,"
-                    "fps=30"
-                )
+                candidate_offsets = [start_ts, "00:00:05.0", "00:00:08.0"] if "dyn_" in fname else [start_ts]
 
-                ffmpeg_cmd = [
-                    FFMPEG_BIN, "-y",
-                    "-ss", start_ts,
-                    "-i", str(src_file),
-                    "-t", f"{duration:.2f}",
-                    "-vf", vf,
-                    "-an",
-                    "-c:v", "libx264",
-                    "-preset", "veryfast",
-                    "-crf", "18",
-                    "-pix_fmt", "yuv420p",
-                    str(out_clip)
-                ]
+                for cur_ts in candidate_offsets:
+                    out_clip = self.clips_dir / f"clip_{clip_counter:03d}_{clip_label}.mp4"
+                    
+                    vf = (
+                        "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,"
+                        "crop=1080:1920,"
+                        "unsharp=5:5:1.2,"
+                        "fps=30"
+                    )
 
-                subprocess.run(ffmpeg_cmd, capture_output=True, timeout=30)
-                if out_clip.exists() and out_clip.stat().st_size > 50000:
+                    ffmpeg_cmd = [
+                        FFMPEG_BIN, "-y",
+                        "-ss", cur_ts,
+                        "-i", str(src_file),
+                        "-t", f"{duration:.2f}",
+                        "-vf", vf,
+                        "-an",
+                        "-c:v", "libx264",
+                        "-preset", "veryfast",
+                        "-crf", "18",
+                        "-pix_fmt", "yuv420p",
+                        str(out_clip)
+                    ]
+
+                    subprocess.run(ffmpeg_cmd, capture_output=True, timeout=30)
+                    if not (out_clip.exists() and out_clip.stat().st_size > 50000):
+                        continue
+
                     # 1. Kesim Sonrası Netlik & Çözünürlük Doğrulaması (Laplacian Floor >= 75.0)
                     w, h, lap_var = measure_laplacian_sharpness(out_clip)
                     if lap_var < 75.0 or w < 720 or h < 720:
                         logger.warning(
-                            f"🚨 [Post-Slice Gate Reddi] {out_clip.name}: "
+                            f"🚨 [Post-Slice Gate Reddi @ {cur_ts}] {out_clip.name}: "
                             f"Laplacian {lap_var:.1f} < 75.0 veya {w}x{h} < 720p!"
                         )
                         out_clip.unlink(missing_ok=True)
@@ -425,7 +518,7 @@ class VideoHarvester:
 
                     # 2. Kesim Sonrası CLIP Negatif Domain & Entity Kontrolü
                     clean_label = clip_label.replace("_", " ")
-                    storyboard_items = STORYBOARD_DEFINITIONS.get(athlete_key, [])
+                    storyboard_items = get_storyboard_for_athlete(athlete_key)
                     sb_query = None
                     for item in storyboard_items:
                         if item[0] == "video" and (item[1] == clip_label or item[1] in clip_label or clip_label in item[1]):
@@ -467,7 +560,7 @@ class VideoHarvester:
                     )
                     if not vision_res["passed"]:
                         logger.warning(
-                            f"🚨 [Post-Slice Gate Reddi - CLIP] {out_clip.name}: {vision_res['reasons']}"
+                            f"🚨 [Post-Slice Gate Reddi - CLIP @ {cur_ts}] {out_clip.name}: {vision_res['reasons']}"
                         )
                         out_clip.unlink(missing_ok=True)
                         continue
@@ -479,7 +572,7 @@ class VideoHarvester:
                     v_query_sc = vision_res.get("query_score", 0.0)
                     if neg_lbl in ["free throw lineup", "players standing on bench dead ball", "heavy motion blur whip pan", "amateur gym with brick wall"] and neg_sc >= v_pos_sc:
                         logger.warning(
-                            f"🚨 [Post-Slice Gate Reddi - Dead-Ball/Negative] {out_clip.name}: "
+                            f"🚨 [Post-Slice Gate Reddi - Dead-Ball/Negative @ {cur_ts}] {out_clip.name}: "
                             f"{neg_lbl} skoru {neg_sc:.4f} >= pos {v_pos_sc:.4f}!"
                         )
                         out_clip.unlink(missing_ok=True)
@@ -507,6 +600,7 @@ class VideoHarvester:
                         f"✂️ [Slice Gate PASS] {out_clip.name:<32} | source_id={source_id:<28} | canonical={canonical_id} | "
                         f"SigLIP_score={siglip_sc:.4f} | neg_score={neg_sc:.4f} ({neg_lbl}) | laplacian={lap_var:.1f}"
                     )
+                    break
 
         # Yerel Küratörlü 1080p B-roll kliplerini de ekle
         self._add_curated_broll_slices(athlete_key, clips_meta)
@@ -570,7 +664,7 @@ class VideoHarvester:
         """Yerel B-roll kesitleri doğrudan VIDEO_SOURCES üzerinden yönetilir; kontamine amatör salon kesitleri tamamen temizlenmiştir."""
         pass
 
-    def fetch_authentic_photos(self, athlete_key: str) -> Dict[str, Path]:
+    def fetch_authentic_photos(self, athlete_key: str, downloaded_videos: Optional[Dict[str, Path]] = None) -> Dict[str, Path]:
         """Küratörlü sporcu fotoğraflarını 1080x1920 Native dikey formata dönüştürür."""
         curated_dir = Path(f"/Users/alienes/yt-oto-video/files/assets/curated_sports/athletes/{athlete_key}")
         candidate_files = sorted(curated_dir.glob("*.jpg")) if curated_dir.exists() else []
@@ -612,6 +706,63 @@ class VideoHarvester:
                 photos_map[dest_photo.stem] = dest_photo
                 photos_map[dest_photo.name] = dest_photo
 
+        # Dinamik Sporcular için Fotoğraf Fallback: Yeterli fotoğraf yoksa (< 25 tekil fotoğraf)
+        # 1. İndirilen HD video kliplerinden yüksek netlikli (Laplacian >= 75.0) dikey kareler çıkar
+        unique_photos = set(photos_map.values())
+        if len(unique_photos) < 25 and downloaded_videos:
+            logger.info(f"📸 [Dinamik Fotoğraf Hasadı] {athlete_key} için yerel arşivde yeterli fotoğraf yok ({len(unique_photos)}). İndirilen HD videolardan dikey kareler çıkarılıyor...")
+            f_idx = 0
+            for vid_name, vid_path in downloaded_videos.items():
+                if not vid_path.exists() or vid_path.stat().st_size < 100000:
+                    continue
+                for sec in ["00:00:02.0", "00:00:05.0", "00:00:08.0", "00:00:11.0", "00:00:13.5"]:
+                    dest_p = self.photos_dir / f"frame_{f_idx:03d}_{vid_path.stem}.jpg"
+                    vf = "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,unsharp=5:5:1.2"
+                    cmd = [
+                        FFMPEG_BIN, "-y",
+                        "-ss", sec,
+                        "-i", str(vid_path),
+                        "-vframes", "1",
+                        "-vf", vf,
+                        "-q:v", "2",
+                        str(dest_p)
+                    ]
+                    subprocess.run(cmd, capture_output=True, timeout=15)
+                    if dest_p.exists() and dest_p.stat().st_size > 20000:
+                        w, h, lap_var = measure_laplacian_sharpness(dest_p)
+                        if lap_var >= 75.0 and (w == 0 or w >= 720) and (h == 0 or h >= 720):
+                            photos_map[dest_p.stem] = dest_p
+                            photos_map[dest_p.name] = dest_p
+                            unique_photos.add(dest_p)
+                            f_idx += 1
+                    if len(unique_photos) >= 35:
+                        break
+                if len(unique_photos) >= 35:
+                    break
+
+        # 2. sports_science ve court_action küratörlü arşivinden de ekle
+        unique_photos = set(photos_map.values())
+        if len(unique_photos) < 25:
+            for extra_sub in ["sports_science", "court_action"]:
+                extra_dir = PROJECT_ROOT / "assets" / "curated_sports" / "b_roll" / extra_sub
+                if extra_dir.exists():
+                    for p_extra in sorted(extra_dir.glob("*.jpg")):
+                        if is_source_banned_for_project(p_extra.name, athlete_key):
+                            continue
+                        dest_p = self.photos_dir / f"broll_{extra_sub}_{p_extra.name}"
+                        if not dest_p.exists():
+                            vf = "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,unsharp=5:5:1.2"
+                            cmd = [FFMPEG_BIN, "-y", "-i", str(p_extra), "-vf", vf, "-q:v", "2", str(dest_p)]
+                            subprocess.run(cmd, capture_output=True, timeout=15)
+                        if dest_p.exists() and dest_p.stat().st_size > 20000:
+                            w, h, lap = measure_laplacian_sharpness(dest_p)
+                            if lap >= 75.0:
+                                photos_map[dest_p.stem] = dest_p
+                                photos_map[dest_p.name] = dest_p
+                                unique_photos.add(dest_p)
+                        if len(unique_photos) >= 35:
+                            break
+
         logger.info(f"📸 Toplam {len(photos_map)//2} adet tam ekran dikey HD fotoğraf hazırlandı.")
         return photos_map
 
@@ -631,7 +782,7 @@ class VideoHarvester:
         
         downloaded = self.download_recipe_videos(athlete_key=athlete_key)
         clips_meta = self.slice_recipe_clips(athlete_key=athlete_key, downloaded_videos=downloaded)
-        photos_map = self.fetch_authentic_photos(athlete_key=athlete_key)
+        photos_map = self.fetch_authentic_photos(athlete_key=athlete_key, downloaded_videos=downloaded)
 
         clips_dict = {c["label"]: c for c in clips_meta}
         for c in clips_meta:
@@ -640,7 +791,7 @@ class VideoHarvester:
 
         pool = []
 
-        storyboard = STORYBOARD_DEFINITIONS.get(athlete_key, [])
+        storyboard = get_storyboard_for_athlete(athlete_key)
 
         for item in storyboard:
             m_type, key, concrete_query = item[0], item[1], item[2]
@@ -658,7 +809,7 @@ class VideoHarvester:
             if m_type == "video":
                 # clips_dict içinden bul (önce tam anahtar eşleşmesi)
                 for k, v in clips_dict.items():
-                    if k == key or k == f"{key}.mp4":
+                    if k == key or k == f"{key}.mp4" or key in k or k in key:
                         if is_source_banned_for_project(v["source_video_id"], athlete_key) or is_source_banned_for_project(v["name"], athlete_key):
                             continue
                         resolved_item = {
@@ -670,24 +821,10 @@ class VideoHarvester:
                             "target_subject": item_target_subj
                         }
                         break
-                if not resolved_item:
-                    for k, v in clips_dict.items():
-                        if key in k:
-                            if is_source_banned_for_project(v["source_video_id"], athlete_key) or is_source_banned_for_project(v["name"], athlete_key):
-                                continue
-                            resolved_item = {
-                                "type": "video",
-                                "path": v["path"],
-                                "name": v["name"],
-                                "source_video_id": v["source_video_id"],
-                                "concrete_visual_query": concrete_query,
-                                "target_subject": item_target_subj
-                            }
-                            break
             else:
                 # photos_map içinden bul (önce tam anahtar eşleşmesi)
                 for k, v in photos_map.items():
-                    if k == key or k == f"{key}.jpg" or v.stem == key:
+                    if k == key or k == f"{key}.jpg" or v.stem == key or key in k or k in key:
                         if is_source_banned_for_project(f"photo_{v.stem}", athlete_key) or is_source_banned_for_project(v.name, athlete_key):
                             continue
                         resolved_item = {

@@ -23,7 +23,7 @@ import imagehash
 
 from src.modules.basketball.contracts import BasketballRenderSpec, BasketballCut, MediaType
 from src.modules.basketball.video_harvester import VideoHarvester, is_source_banned_for_project
-from src.modules.basketball.asset_validator import BasketballAssetValidator
+from src.modules.basketball.asset_validator import BasketballAssetValidator, compute_file_md5
 from src.modules.basketball.validator import get_3point_fingerprints, measure_laplacian_sharpness
 from src.modules.basketball.vision_verifier import BasketballVisionVerifier
 
@@ -55,6 +55,7 @@ def normalize_sports_subtitles(text: str) -> str:
         (r'(?i)\bseconds-beating\b', 'seconds. Beating'),
         (r'(?i)\bdime-ranked\b', 'dime. Ranked'),
         (r'(?i)\bdeceleration-the\b', 'deceleration, the'),
+        (r'(?i)\bfifty[\s-]five[\s-]degree\b', '55-degree'),
     ]
     res = text
     for pat, rep in rules:
@@ -91,7 +92,9 @@ class BasketballOrchestrator:
         locked_hashes: List[Tuple[int, str, List[imagehash.ImageHash]]],
         candidate_pool: List[Dict[str, Any]],
         work_dir: Path,
-        auto_requery: Optional[bool] = None
+        auto_requery: Optional[bool] = None,
+        locked_file_hashes: Optional[Set[str]] = None,
+        locked_file_names: Optional[Set[str]] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Gate 6 & 2 & 3: Kilitli olmayan sahne için onaylı yeni aday seçer.
@@ -135,6 +138,15 @@ class BasketballOrchestrator:
 
             if cand_source_id in locked_source_ids:
                 logger.info(f"🚫 [Gate 3 - Source Quota] {cand_p.name} ({cand_source_id}) kilitli sahnelerde zaten mevcut!")
+                return None
+
+            if locked_file_names and cand_p.name in locked_file_names:
+                logger.info(f"🚫 [Gate 3 - File Name Quota] {cand_p.name} zaten kilitli/kullanılmış dosyalarda mevcut!")
+                return None
+
+            cand_hash = compute_file_md5(cand_p)
+            if locked_file_hashes and cand_hash and cand_hash in locked_file_hashes:
+                logger.info(f"🚫 [Gate 3 - File Hash Quota] {cand_p.name} ({cand_hash}) dosya içeriği zaten kilitli/kullanılmış sahnelerde mevcut!")
                 return None
 
             w, h, lap_var = measure_laplacian_sharpness(cand_p)
@@ -270,7 +282,11 @@ class BasketballOrchestrator:
         if CURATED_BROLL_DIR.exists():
             for b_file in sorted(CURATED_BROLL_DIR.glob("*.mp4")):
                 b_sid = f"src_broll_{b_file.stem}"
-                if b_sid not in locked_source_ids:
+                if b_sid in locked_source_ids or (locked_file_names and b_file.name in locked_file_names):
+                    continue
+                b_hash = compute_file_md5(b_file)
+                if locked_file_hashes and b_hash and b_hash in locked_file_hashes:
+                    continue
                     out_broll_slice = work_dir / "action_clips" / f"requery_broll_{b_file.stem}.mp4"
                     out_broll_slice.parent.mkdir(parents=True, exist_ok=True)
                     if not out_broll_slice.exists() or out_broll_slice.stat().st_size < 10000:
@@ -348,6 +364,16 @@ class BasketballOrchestrator:
         enforced = []
         max_frames = int(round(max_cut_duration * fps))
         used_sources = {c.get("source_video_id") or Path(c.get("media_path", "")).stem for c in cuts if c.get("source_video_id") or c.get("media_path")}
+        used_file_names = {Path(c.get("media_path", "")).name for c in cuts if c.get("media_path")}
+        used_file_hashes: Set[str] = set()
+        for c in cuts:
+            mp = c.get("media_path")
+            if mp:
+                p = Path(mp)
+                if p.exists():
+                    h = compute_file_md5(p)
+                    if h:
+                        used_file_hashes.add(h)
         work_path = work_dir or (PROJECT_ROOT / "output" / self.channel_id / "kontrol" / job_id / "basketball_v2_work")
 
         for cut in cuts:
@@ -379,7 +405,10 @@ class BasketballOrchestrator:
                             if not cand_p.exists():
                                 continue
                             cand_sid = cand_item.get("source_video_id") or cand_p.stem
-                            if cand_sid in used_sources:
+                            if cand_sid in used_sources or cand_p.name in used_file_names:
+                                continue
+                            cand_h = compute_file_md5(cand_p)
+                            if cand_h and cand_h in used_file_hashes:
                                 continue
                             if is_source_banned_for_project(cand_sid, athlete_key) or is_source_banned_for_project(cand_p.name, athlete_key):
                                 continue
@@ -407,6 +436,9 @@ class BasketballOrchestrator:
 
                             alt_asset = cand_item
                             used_sources.add(cand_sid)
+                            used_file_names.add(cand_p.name)
+                            if cand_h:
+                                used_file_hashes.add(cand_h)
                             break
 
                         # 2. Havuz yetersizse re-query loop ile taze aday üret (Asla 'cut' duplicate etme!)
@@ -420,11 +452,19 @@ class BasketballOrchestrator:
                                 locked_source_ids=used_sources,
                                 locked_hashes=[],
                                 candidate_pool=[],
-                                work_dir=work_path
+                                work_dir=work_path,
+                                locked_file_hashes=used_file_hashes,
+                                locked_file_names=used_file_names
                             )
                             if rep:
                                 alt_asset = rep
-                                used_sources.add(rep.get("source_video_id", Path(rep["path"]).stem))
+                                rep_p = Path(rep["path"])
+                                rep_sid = rep.get("source_video_id", rep_p.stem)
+                                used_sources.add(rep_sid)
+                                used_file_names.add(rep_p.name)
+                                rep_h = compute_file_md5(rep_p)
+                                if rep_h:
+                                    used_file_hashes.add(rep_h)
                             else:
                                 # Öncelik 2: Fotoğraf adayı
                                 rep_img = self.select_replacement_asset(
@@ -434,11 +474,19 @@ class BasketballOrchestrator:
                                     locked_source_ids=used_sources,
                                     locked_hashes=[],
                                     candidate_pool=[],
-                                    work_dir=work_path
+                                    work_dir=work_path,
+                                    locked_file_hashes=used_file_hashes,
+                                    locked_file_names=used_file_names
                                 )
                                 if rep_img:
                                     alt_asset = rep_img
-                                    used_sources.add(rep_img.get("source_video_id", Path(rep_img["path"]).stem))
+                                    rep_img_p = Path(rep_img["path"])
+                                    rep_img_sid = rep_img.get("source_video_id", rep_img_p.stem)
+                                    used_sources.add(rep_img_sid)
+                                    used_file_names.add(rep_img_p.name)
+                                    rep_img_h = compute_file_md5(rep_img_p)
+                                    if rep_img_h:
+                                        used_file_hashes.add(rep_img_h)
                                 else:
                                     raise RuntimeError(
                                         f"🚨 [Pacing Splitter] Cut {cut['id']} bölünürken geçerli taze görsel bulunamadı! "
@@ -457,6 +505,10 @@ class BasketballOrchestrator:
                             alt_media_path = str(dest_alt)
                             if job_id:
                                 alt_media_rel = f"media/basketball/{job_id}/{alt_p.name}"
+                            dest_h = compute_file_md5(dest_alt)
+                            if dest_h:
+                                used_file_hashes.add(dest_h)
+                            used_file_names.add(dest_alt.name)
 
                         enforced.append({
                             "id": f"{cut['id']}_p{p_idx}",
@@ -852,7 +904,7 @@ class BasketballOrchestrator:
             audio_path=str(dest_audio),
             sentence_boundaries=sentence_boundaries,
             cuts=cuts,
-            category_badge_text="🏀 SPORTS SCIENCE",
+            category_badge_text="SPORTS SCIENCE",
             category_badge_duration=4.0
         )
         spec.validate_strict_zero_loop()
@@ -861,7 +913,7 @@ class BasketballOrchestrator:
         # 7. Remotion Render Props JSON Dosyası Oluştur
         remotion_props = {
             "topic": topic,
-            "categoryBadgeText": "🏀 SPORTS SCIENCE",
+            "categoryBadgeText": "SPORTS SCIENCE",
             "badgeDurationFrames": 120, # Tam 4.0 saniye
             "audioPath": relative_audio_path,
             "cuts": enforced_cuts,

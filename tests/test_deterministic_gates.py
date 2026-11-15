@@ -92,6 +92,9 @@ class TestDeterministicGates(unittest.TestCase):
             "empty basketball gym wall or floor without players",
             "close up sneakers on floor",
             "outdoor asphalt streetball court",
+            "outdoor painted concrete basketball court",
+            "outdoor streetball court",
+            "close up sneakers on outdoor court",
             "football or soccer stadium",
             "athletics running track",
             "players standing on bench dead ball",
@@ -428,6 +431,10 @@ class TestDeterministicGates(unittest.TestCase):
         try:
             # 1. Ses dosyası
             orig_vo = PROJECT_ROOT / "output" / "thebasketballshows" / "kontrol" / "exec_mat_20261104_224042_The_Deceleration_Secret_Behind" / "voiceover.mp3"
+            if not orig_vo.exists():
+                orig_vo = PROJECT_ROOT / "output" / "thebasketballshows" / "yuklenen" / "exec_mat_20261104_224042_The_Deceleration_Secret_Behind" / "voiceover.mp3"
+            if not orig_vo.exists():
+                orig_vo = PROJECT_ROOT / "remotion" / "public" / "media" / "basketball" / "exec_mat_20261104_224042_The_Deceleration_Secret_Behind" / "voiceover.mp3"
             shutil.copy2(str(orig_vo), str(mock_job_dir / "voiceover.mp3"))
 
             # 2. Gerçek küratörlü fotoğraflardan kopyala (CLIP Gate 2 ve Laplacian Gate 4 onaylı)
@@ -698,6 +705,10 @@ class TestDeterministicGates(unittest.TestCase):
             # 1. Sahte voiceover ve stale manifest oluştur
             vo_file = mock_job_dir / "voiceover.mp3"
             orig_vo = PROJECT_ROOT / "output" / "thebasketballshows" / "kontrol" / "exec_mat_20261104_224042_The_Deceleration_Secret_Behind" / "voiceover.mp3"
+            if not orig_vo.exists():
+                orig_vo = PROJECT_ROOT / "output" / "thebasketballshows" / "yuklenen" / "exec_mat_20261104_224042_The_Deceleration_Secret_Behind" / "voiceover.mp3"
+            if not orig_vo.exists():
+                orig_vo = PROJECT_ROOT / "remotion" / "public" / "media" / "basketball" / "exec_mat_20261104_224042_The_Deceleration_Secret_Behind" / "voiceover.mp3"
             shutil.copy2(str(orig_vo), str(vo_file))
 
             manifest_file = mock_job_dir / "timeline_manifest.json"

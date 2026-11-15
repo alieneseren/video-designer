@@ -197,7 +197,7 @@ const CategoryBadge: React.FC<{
   const frame = useCurrentFrame();
 
   // 4 saniyeden (120 kare) sonra kesinlikle render etme!
-  if (frame > maxDurationFrames) {
+  if (frame >= maxDurationFrames) {
     return null;
   }
 
@@ -349,7 +349,7 @@ const SocialCTAButton: React.FC<{
 // ── ANA BASKETBALL SHORTS BİLEŞENİ ──
 export const BasketballShorts: React.FC<BasketballShortsProps> = ({
   topic,
-  categoryBadgeText = "🏀 SPORTS SCIENCE",
+  categoryBadgeText = "SPORTS SCIENCE",
   badgeDurationFrames = 120, // 4.0 saniye
   audioPath,
   bgmPath,
