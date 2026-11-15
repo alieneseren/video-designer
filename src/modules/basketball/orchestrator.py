@@ -40,6 +40,8 @@ if str(PROJECT_ROOT / "src") not in sys.path:
 def normalize_sports_subtitles(text: str) -> str:
     """Hızlı Shorts tüketimi için uzun sayısal kelimeleri temiz rakamlara dönüştürür."""
     rules = [
+        (r'(?i)\bswears\s+up\b', 'squares up'),
+        (r'(?i)\bswear\s+up\b', 'square up'),
         (r'(?i)\bninety-ninth percentile\b', '99th percentile'),
         (r'(?i)\bninety-ninth\b', '99th'),
         (r'(?i)\bzero point three-seven seconds\b', '0.37 seconds'),
@@ -400,7 +402,7 @@ class BasketballOrchestrator:
         self,
         cuts: List[Dict[str, Any]],
         backup_pool: List[Dict[str, Any]],
-        max_cut_duration: float = 2.40,
+        max_cut_duration: float = 2.20,
         fps: int = 30,
         public_media_job_dir: Optional[Path] = None,
         job_id: str = "",
@@ -408,9 +410,9 @@ class BasketballOrchestrator:
         work_dir: Optional[Path] = None
     ) -> List[Dict[str, Any]]:
         """
-        Kod seviyesinde sert 2.4s kuralı:
+        Kod seviyesinde sert 2.20s kuralı:
         Herhangi bir kesme max_cut_duration'dan uzunsa, deterministik olarak
-        <= 2.4s parçalara böler ve araya onaylı B-roll/görsel enjekte eder.
+        <= 2.20s parçalara böler ve araya onaylı B-roll/görsel enjekte eder.
         Sıfır Döngü Garantisi: Asla aynı klibi (cut) tekrar etmez.
         """
         enforced = []
@@ -852,6 +854,20 @@ class BasketballOrchestrator:
                         "durationInFrames": d_frames,
                         "locked": True
                     })
+
+            # Manifest kesitlerinde de 2.20s sert sınırını garanti et
+            if any(c["durationInFrames"] > int(round(2.20 * fps)) for c in enforced_cuts):
+                bp = harvester.get_backup_pool(athlete_key=athlete_key, used_paths=[c["media_path"] for c in enforced_cuts])
+                enforced_cuts = self.enforce_hard_pacing_limits(
+                    cuts=enforced_cuts,
+                    backup_pool=bp,
+                    max_cut_duration=2.20,
+                    fps=fps,
+                    public_media_job_dir=public_media_job_dir,
+                    job_id=job_id,
+                    athlete_key=athlete_key,
+                    work_dir=work_dir
+                )
         else:
             # =========================================================
             # SIFIRDAN ÜRETİM MODU (Fresh Build)
@@ -905,19 +921,19 @@ class BasketballOrchestrator:
 
                 current_frame += dur_f
 
-            # 4. Kod Seviyesinde Sert 2.4s Pacing Bölücü (Hard Splitter)
+            # 4. Kod Seviyesinde Sert 2.20s Pacing Bölücü (Hard Splitter)
             backup_pool = harvester.get_backup_pool(athlete_key=athlete_key, used_paths=[c["media_path"] for c in remotion_cuts])
             enforced_cuts = self.enforce_hard_pacing_limits(
                 cuts=remotion_cuts,
                 backup_pool=backup_pool,
-                max_cut_duration=2.40,
+                max_cut_duration=2.20,
                 fps=fps,
                 public_media_job_dir=public_media_job_dir,
                 job_id=job_id,
                 athlete_key=athlete_key,
                 work_dir=work_dir
             )
-            logger.info(f"✂️ [Hard Splitter Uygulandı] Kesme adedi: {len(remotion_cuts)} -> {len(enforced_cuts)} (Tümü <= 2.40s)")
+            logger.info(f"✂️ [Hard Splitter Uygulandı] Kesme adedi: {len(remotion_cuts)} -> {len(enforced_cuts)} (Tümü <= 2.20s)")
 
         cuts = [
             BasketballCut(

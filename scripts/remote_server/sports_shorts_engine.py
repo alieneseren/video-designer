@@ -88,6 +88,8 @@ SPORTS_NAME_REPLACEMENTS = {
     r"\blakers\b": "Lakers",
     r"\bbulls\b": "Bulls",
     r"\bceltics\b": "Celtics",
+    r"\bswears\s+up\b": "squares up",
+    r"\bswear\s+up\b": "square up",
 }
 
 NBA_KNOWN_PLAYERS = [
@@ -697,8 +699,10 @@ def generate_basketball_subtitles_overlay(
 
     full_narr = " ".join(raw_texts)
 
-    # Sayı ifadelerini ve yüzdeleri rakamsal formatla ("zero point two" -> "0.2s", "ninety ninth" -> "99th", "fifty five-degree" -> "55-degree")
+    # Sayı ifadelerini ve yüzdeleri rakamsal formatla ("zero point two" -> "0.2s", "ninety ninth" -> "99th", "fifty five-degree" -> "55-degree", Whisper ASR düzeltmeleri)
     number_replacements = [
+        (r'\bswears\s+up\b', 'squares up'),
+        (r'\bswear\s+up\b', 'square up'),
         (r'\bfifty[\s-]five[\s-]degree(s)?\b', '55-degree'),
         (r'\bfifty[\s-]five\b', '55'),
         (r'\bzero point two\b', '0.2s'),
@@ -1056,8 +1060,10 @@ def render_sports_shorts_job(job_data: dict, work_dir: Path, workspace_dir: Opti
                         should_add = True
                     elif athlete_key == "james_harden" and any(k in b_name for k in ["harden", "quad", "mocap", "friction", "shoes", "swish", "ankle", "stepback"]):
                         should_add = True
-                    elif athlete_key == "nikola_jokic" and any(k in b_name for k in ["jokic", "sombor", "mocap", "biomechanic", "swish", "arena", "parabolic", "science"]):
-                        should_add = True
+                    elif athlete_key == "nikola_jokic" and any(k in b_name for k in ["jokic", "sombor", "mocap", "biomechanic", "swish", "parabolic", "science"]):
+                        # San Antonio Spurs / SBC Center / Fisher / Durant sızıntılarını kilitli engelle
+                        if not any(b_kw in b_name for b_kw in ["san_antonio", "sbc", "spurs", "fisher", "durant", "warriors"]):
+                            should_add = True
 
                     if should_add:
                         target_b = photo_pool_dir / f"curated_broll_{b_img.name}"

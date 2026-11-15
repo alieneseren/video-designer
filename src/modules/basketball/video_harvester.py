@@ -35,11 +35,16 @@ CURATED_BROLL_DIR = PROJECT_ROOT / "assets" / "curated_sports" / "b_roll" / "vid
 BANNED_PROJECT_SOURCES = {
     "james_harden": [
         "spurs", "fisher", "derek", "neurobiology", "sbc_center", "2004_playoffs",
-        "lakers_vs_spurs", "trent_tucker", "duncan", "san_antonio"
+        "lakers_vs_spurs", "trent_tucker", "duncan", "san_antonio", "jokic", "sombor", "denver"
     ],
     "derek_fisher": [
         "harden", "rockets", "deceleration", "biomechanics_harden", "wesley_johnson",
-        "eurostep", "ankle_breaker"
+        "eurostep", "ankle_breaker", "jokic", "sombor", "denver"
+    ],
+    "nikola_jokic": [
+        "spurs", "fisher", "derek", "neurobiology", "sbc_center", "2004_playoffs",
+        "lakers_vs_spurs", "trent_tucker", "duncan", "san_antonio", "harden", "rockets",
+        "durant", "torrey_craig", "warriors", "wesley_johnson"
     ]
 }
 
@@ -131,6 +136,18 @@ def is_source_banned_for_project(source_id_or_path: str, athlete_key: str) -> bo
     if "harden" not in key:
         harden_terms = ["harden", "wesley_johnson"]
         if any(term in src_str for term in harden_terms):
+            return True
+
+    # Nikola Jokic harici sporcularda Jokic spesifik varlıklar ASLA kullanılamaz
+    if "jokic" not in key:
+        jokic_terms = ["jokic", "sombor"]
+        if any(term in src_str for term in jokic_terms):
+            return True
+
+    # Nikola Jokic projelerinde San Antonio, Fisher, Durant, Warriors, Spurs kesinlikle engellenir
+    if "jokic" in key:
+        jokic_banned = ["spurs", "fisher", "derek", "sbc_center", "2004_playoffs", "lakers_vs_spurs", "san_antonio", "durant", "torrey_craig", "warriors"]
+        if any(term in src_str for term in jokic_banned):
             return True
 
     for proj_key, banned_terms in BANNED_PROJECT_SOURCES.items():
@@ -421,16 +438,17 @@ class VideoHarvester:
         for idx, (_, clip_label, concrete_query) in enumerate(video_items):
             c_lower = concrete_query.lower()
             l_lower = clip_label.lower()
+            team_affil = "Denver Nuggets" if "jokic" in athlete_key else "NBA"
             if any(k in c_lower or k in l_lower for k in ["mocap", "wireframe", "laboratory", "sport_science"]):
-                search_q = "ESPN Sport Science wireframe basketball"
+                search_q = f"ESPN Sport Science wireframe basketball {clean_name}"
             elif any(k in c_lower or k in l_lower for k in ["brain", "synapse", "neural"]):
                 search_q = "scientific 3D animation neurology impulses visual cortex visual"
             elif any(k in c_lower or k in l_lower for k in ["swish", "net"]):
-                search_q = "basketball swish through net slow motion NBA"
+                search_q = f"{clean_name} {team_affil} shot swish through net slow motion NBA HD"
             elif any(k in c_lower or k in l_lower for k in ["defense", "mirroring"]):
-                search_q = "NBA basketball defense pick and roll highlights broadcast HD"
+                search_q = f"{clean_name} {team_affil} defense pick and roll highlights broadcast HD"
             elif any(k in c_lower or k in l_lower for k in ["clutch", "buzzer", "winner"]):
-                search_q = f"{clean_name} clutch game winner shot NBA HD"
+                search_q = f"{clean_name} {team_affil} clutch game winner shot NBA HD"
             elif any(k in c_lower or k in l_lower for k in ["assist", "pass"]):
                 search_q = f"{clean_name} best passes assists NBA HD"
             elif any(k in c_lower or k in l_lower for k in ["post", "pivot"]):
