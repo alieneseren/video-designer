@@ -1150,27 +1150,79 @@ def reproduce_kontrol_video(payload: KontrolReproducePayload, background_tasks: 
             if not runner.is_reachable():
                 raise HTTPException(status_code=503, detail="Oracle Cloud sunucusuna (132.226.187.103) SSH üzerinden ulaşılamadı.")
 
+            target_job_id = None
             try:
                 server_res = runner.regenerate_server_video(payload.channel_id, job_id)
-                return {
-                    "success": True,
-                    "mode": "server",
-                    "message": f"'{title}' bulut worker kuyruğuna alındı ({server_res.get('new_job_id', job_id)}).",
-                    "server_response": server_res
-                }
+                target_job_id = server_res.get("job_id") or server_res.get("new_job_id")
             except Exception as e_reg:
                 rc, out, _ = runner._run_ssh_cmd(f"test -f {runner.remote_dir}/jobs/{job_id}.json && echo 'EXISTS'")
                 if "EXISTS" in out:
                     run_cmd = f"nohup bash {runner.remote_dir}/run_job.sh {runner.remote_dir}/jobs/{job_id}.json > {runner.remote_dir}/logs/{job_id}.log 2>&1 &"
                     runner._run_ssh_cmd(run_cmd)
-                    return {
-                        "success": True,
-                        "mode": "server",
-                        "message": f"'{title}' sunucuda arka planda render edilmek üzere başlatıldı.",
-                        "job_id": job_id
-                    }
+                    target_job_id = job_id
                 else:
                     raise RuntimeError(f"Sunucuda iş materyali ({job_id}.json) bulunamadı: {e_reg}")
+
+            execution_manager.create(
+                exec_id=exec_id,
+                channel_id=payload.channel_id,
+                total_steps=4,
+                metadata={
+                    "mode": "server",
+                    "channel_id": payload.channel_id,
+                    "folder_name": payload.folder_name,
+                    "title": title,
+                    "job_id": target_job_id
+                }
+            )
+
+            # Arka planda sunucuyu izle ve tamamlandığında doğrudan 'kontrol/' klasörüne indir
+            def _watch_server_and_auto_download(tgt_id):
+                import time
+                max_wait = 1800  # 30 dakika
+                poll_interval = 8
+                elapsed = 0
+                while elapsed < max_wait:
+                    time.sleep(poll_interval)
+                    elapsed += poll_interval
+                    try:
+                        st = runner.get_job_status(tgt_id)
+                        status_str = st.get("status")
+                        if status_str in ["rendering", "running"]:
+                            execution_manager.update(exec_id, status="running", step=2, message=f"Sunucu: Render ediliyor (%{st.get('progress', 30)})...")
+                        elif status_str == "completed":
+                            execution_manager.update(exec_id, status="running", step=3, message="Video sunucuda tamamlandı. 'kontrol/' klasörüne indiriliyor...")
+                            dl_res = runner.download_and_cleanup_job(
+                                channel_id=payload.channel_id,
+                                job_id=tgt_id,
+                                delete_remote=True,
+                                force=True
+                            )
+                            print(f"[KONTROL-AUTO-SYNC] ✅ {tgt_id} sunucudan 'kontrol/' klasörüne indirildi: {dl_res.get('video_path')}")
+                            execution_manager.update(
+                                exec_id,
+                                status="completed",
+                                step=4,
+                                message="Video sunucuda başarıyla üretildi ve doğrudan 'kontrol' klasörüne indirildi!",
+                                result=dl_res
+                            )
+                            break
+                        elif status_str == "failed":
+                            err_msg = st.get("error", "Sunucuda render başarısız oldu.")
+                            execution_manager.fail(exec_id, err_msg)
+                            break
+                    except Exception as e_poll:
+                        pass
+
+            background_tasks.add_task(_watch_server_and_auto_download, target_job_id)
+
+            return {
+                "success": True,
+                "mode": "server",
+                "exec_id": exec_id,
+                "job_id": target_job_id,
+                "message": f"'{title}' sunucuda yeniden üretime alındı. Tamamlandığında doğrudan 'kontrol' klasörüne indirilecek."
+            }
 
         except HTTPException:
             raise
