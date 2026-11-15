@@ -24,6 +24,10 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from .bubble import ComicBubble, InfoBadge, get_engine_font, wrap_text
 from .animator import StickmanTimeline
 from .overlay import get_ffmpeg_binary
+from .satire_motion_catalog import resolve_satire_motion, SATIRE_MOTIONS
+from .ardy_controller import ArdyMotionController
+from .camera_projection import CameraDirector, CameraConfig
+from .crayon_mesh_renderer import CrayonMeshRenderer
 
 W = 1920
 H = 1080
@@ -366,5 +370,173 @@ class SatireSceneProducer:
         if proc.returncode != 0:
             err = proc.stderr.read().decode("utf-8", errors="ignore")
             raise RuntimeError(f"Crayon Military Satire render failed: {err}")
+
+        return out_p
+
+    def render_ardy_satire_scene(
+        self,
+        output_path: str,
+        motion_key_or_prompt: str = "war_room_slam",
+        archetype: str = "general",
+        emotion: str = "angry",
+        program_title: str = "DEFENSE CONTRACTOR SPEND AUDIT",
+        dialogue_text: str = "We gave you 1.7 TRILLION dollars!",
+        badge_text: str = "GENERAL VANCE [PENTAGON]",
+        badge_color: Tuple[int, int, int] = (220, 38, 38),
+        highlight_keywords: Optional[List[str]] = None,
+        duration_sec: float = 3.5,
+        dutch_tilt_deg: float = 0.0,
+        punch_in_zoom: float = 1.0,
+        camera_shake_px: float = 0.0,
+        audio_path: Optional[str] = None,
+        bg_image_path: Optional[str] = None
+    ) -> Path:
+        """
+        Renders a cinematic, 3D ARDY-driven stickman satire scene with 12 FPS
+        crayon boiling line shader and expressive puppet kinematics.
+        """
+        out_p = Path(output_path)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        total_frames = int(round(duration_sec * self.fps))
+
+        # 1. ARDY 3D Motion Synthesis
+        ardy = ArdyMotionController()
+        joints_3d = ardy.get_motion(motion_key_or_prompt, duration_sec=duration_sec, fps=self.fps)
+
+        # 2. 3D-to-2D Perspective Camera Projection
+        # Ground level relative to aspect ratio (9:16 Shorts vs 16:9 Landscape)
+        ground_y = int(self.h * 0.88) if self.h > self.w else int(self.h * 0.82)
+        cam = CameraDirector(screen_w=self.w, screen_h=self.h, ground_y=ground_y)
+
+        # Center puppet
+        char_scale = 1.25 if self.h > self.w else 1.05
+        joints_2d, _ = cam.project_motion(
+            joints_3d,
+            character_center_x=self.w // 2,
+            character_scale=char_scale,
+            dutch_tilt_deg=dutch_tilt_deg,
+            punch_in_zoom=punch_in_zoom,
+            camera_shake_px=camera_shake_px
+        )
+
+        # 3. Background Setup
+        bg_img = None
+        if bg_image_path and Path(bg_image_path).exists():
+            bg_img = Image.open(bg_image_path).convert("RGBA").resize((self.w, self.h), Image.Resampling.LANCZOS)
+        else:
+            cand_bgs = [
+                Path("assets/crayon_military_bg.jpg"),
+                Path("assets/crayon_paper_bg.jpg"),
+                Path("assets/crayon_bg.jpg")
+            ]
+            for cb in cand_bgs:
+                if cb.exists():
+                    bg_img = Image.open(cb).convert("RGBA").resize((self.w, self.h), Image.Resampling.LANCZOS)
+                    break
+            if bg_img is None:
+                # Authentic off-white sketchbook paper background
+                bg_img = Image.new("RGBA", (self.w, self.h), (244, 241, 234, 255))
+
+        renderer = CrayonMeshRenderer()
+
+        # 4. FFmpeg Video Encoding Stream
+        ffmpeg_cmd = [
+            self.ffmpeg_bin,
+            "-y",
+            "-f", "rawvideo",
+            "-vcodec", "rawvideo",
+            "-s", f"{self.w}x{self.h}",
+            "-pix_fmt", "rgba",
+            "-r", str(self.fps),
+            "-i", "-",
+        ]
+
+        if audio_path and Path(audio_path).exists():
+            ffmpeg_cmd.extend(["-i", str(audio_path)])
+
+        ffmpeg_cmd.extend([
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "18",
+            "-pix_fmt", "yuv420p",
+        ])
+
+        if audio_path and Path(audio_path).exists():
+            ffmpeg_cmd.extend(["-c:a", "aac", "-b:a", "192k", "-shortest"])
+
+        ffmpeg_cmd.append(str(out_p))
+
+        proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        for f_idx in range(total_frames):
+            t = f_idx / float(self.fps)
+            frame = bg_img.copy()
+            draw = ImageDraw.Draw(frame)
+
+            # Ground shadow / table guideline
+            table_y = ground_y - int(38 * char_scale)
+            draw.line([(self.w // 2 - 320, table_y), (self.w // 2 + 320, table_y)], fill=(180, 175, 165), width=4)
+
+            # Draw ARDY 3D-projected puppet with 12 FPS boiling line shader
+            renderer.render_puppet(
+                draw=draw,
+                joints_2d=joints_2d[f_idx],
+                frame_idx=f_idx,
+                archetype=archetype,
+                emotion=emotion,
+                scale=char_scale
+            )
+
+            # Header Banner
+            if program_title:
+                banner_w = min(self.w - 80, 940)
+                draw.rounded_rectangle(
+                    [(self.w // 2 - banner_w // 2, 30), (self.w // 2 + banner_w // 2, 95)],
+                    radius=12,
+                    fill=(15, 23, 42, 235),
+                    outline=(245, 158, 11),
+                    width=2
+                )
+                draw.text(
+                    (self.w // 2 - banner_w // 2 + 25, 42),
+                    f">> {program_title.upper()}",
+                    font=get_engine_font(20 if self.w > self.h else 28, bold=True),
+                    fill=(255, 255, 255)
+                )
+
+            # Dialogue Comic Bubble
+            if dialogue_text:
+                bubble_scale = StickmanTimeline.bubble_spring_scale(t, t_start=0.25, pop_duration=0.40)
+                if bubble_scale > 0.05:
+                    head_x = float(joints_2d[f_idx, 15, 0])
+                    head_y = float(joints_2d[f_idx, 15, 1])
+                    bubble_w = min(self.w - 100, 580)
+                    bubble_h = 175
+                    bubble_x = max(40, min(self.w - bubble_w - 40, int(head_x - bubble_w // 2)))
+                    bubble_y = max(110, int(head_y - bubble_h - 40))
+
+                    ComicBubble.draw(
+                        draw=draw,
+                        x=bubble_x,
+                        y=bubble_y,
+                        w=bubble_w,
+                        h=bubble_h,
+                        tail_target=(head_x, head_y - 20),
+                        badge_text=badge_text,
+                        badge_color=badge_color,
+                        quote_text=dialogue_text,
+                        scale=bubble_scale,
+                        max_chars=26,
+                        highlight_keywords=highlight_keywords or ["TRILLION", "BILLION", "CRASH", "FAIL", "AUDIT", "SPEND"]
+                    )
+
+            proc.stdin.write(frame.tobytes())
+
+        proc.stdin.close()
+        proc.wait()
+
+        if proc.returncode != 0:
+            err = proc.stderr.read().decode("utf-8", errors="ignore")
+            raise RuntimeError(f"Crayon ARDY Satire render failed: {err}")
 
         return out_p

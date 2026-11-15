@@ -22,6 +22,10 @@ from .aviation_scenes import AviationSceneProducer
 from .satire_scenes import SatireSceneProducer
 from .crayon_strut import CrayonStrutRig, CrayonStrutProducer
 from .engine import StickmanEngine
+from .satire_motion_catalog import SATIRE_MOTIONS, SatireMotionDef, resolve_satire_motion
+from .ardy_controller import ArdyMotionController
+from .camera_projection import CameraDirector, CameraConfig
+from .crayon_mesh_renderer import CrayonMeshRenderer
 
 __all__ = [
     "StickmanCharacter",
@@ -44,5 +48,12 @@ __all__ = [
     "CrayonStrutProducer",
     "solve_2joint_ik",
     "StickmanEngine",
+    "SATIRE_MOTIONS",
+    "SatireMotionDef",
+    "resolve_satire_motion",
+    "ArdyMotionController",
+    "CameraDirector",
+    "CameraConfig",
+    "CrayonMeshRenderer",
 ]
 

@@ -4465,16 +4465,82 @@ def render_crayon_story_shot(
     draw.text((72, 48), scene_label, font=get_font_safe(18, mono=True), fill=pale)
 
     if scene_data.get("character_active") and scene_data.get("character_dialogue"):
-        actor = speaker_img.copy()
-        actor.thumbnail((250, 340), Image.Resampling.LANCZOS)
         on_left = str(scene_data.get("character_position") or "bottom_right").endswith("left")
-        actor_x = 72 if on_left else W - actor.width - 72
-        frame.alpha_composite(actor, (actor_x, H - actor.height - 105))
+        char_name = str(scene_data.get("char") or scene_data.get("active_character") or "general")
         bubble = str(scene_data["character_dialogue"]).strip()
+
+        # Dynamic 3D ARDY-projected puppet with hand-drawn boiling line shader
+        rendered_ardy = draw_ardy_satirical_puppet(
+            frame=frame,
+            draw=draw,
+            character_name=char_name,
+            dialogue=bubble,
+            t_sub=t_sub,
+            duration=duration,
+            on_left=on_left
+        )
+
+        # Fallback to static actor cutout if ARDY is unavailable
+        if not rendered_ardy and speaker_img:
+            actor = speaker_img.copy()
+            actor.thumbnail((250, 340), Image.Resampling.LANCZOS)
+            actor_x = 72 if on_left else W - actor.width - 72
+            frame.alpha_composite(actor, (actor_x, H - actor.height - 105))
+
         bubble_box = (340, 150, 790, 294) if on_left else (W - 800, 150, W - 350, 294)
         draw.rounded_rectangle(bubble_box, radius=22, fill=(247, 247, 235, 250), outline=accent, width=4)
         for line_idx, line in enumerate(textwrap.wrap(bubble, width=24)[:2]):
             draw.text((bubble_box[0] + 24, bubble_box[1] + 34 + line_idx * 48), line, font=get_pop_font(32), fill=(24, 35, 43, 255))
+
+
+def draw_ardy_satirical_puppet(
+    frame: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    character_name: str,
+    dialogue: str,
+    t_sub: float,
+    duration: float,
+    on_left: bool = False,
+    scale: float = 0.95
+) -> bool:
+    """Renders dynamic 3D ARDY-projected stickman with 12 FPS boiling line shader."""
+    try:
+        try:
+            from stickman_engine.ardy_controller import ArdyMotionController
+            from stickman_engine.camera_projection import CameraDirector
+            from stickman_engine.crayon_mesh_renderer import CrayonMeshRenderer
+            from stickman_engine.satire_motion_catalog import resolve_satire_motion
+        except ImportError:
+            from src.stickman_engine.ardy_controller import ArdyMotionController
+            from src.stickman_engine.camera_projection import CameraDirector
+            from src.stickman_engine.crayon_mesh_renderer import CrayonMeshRenderer
+            from src.stickman_engine.satire_motion_catalog import resolve_satire_motion
+
+        m_def = resolve_satire_motion(script_text=dialogue, character_role=character_name)
+        ardy = ArdyMotionController()
+        joints_3d = ardy.get_motion(m_def.motion_id, duration_sec=max(1.0, duration), fps=FPS)
+
+        cam = CameraDirector(screen_w=W, screen_h=H, ground_y=H - 95)
+        center_x = 220 if on_left else W - 220
+        joints_2d, _ = cam.project_motion(
+            joints_3d,
+            character_center_x=center_x,
+            character_scale=scale
+        )
+
+        frame_idx = min(len(joints_2d) - 1, max(0, int(t_sub * FPS)))
+        renderer = CrayonMeshRenderer()
+        renderer.render_puppet(
+            draw=draw,
+            joints_2d=joints_2d[frame_idx],
+            frame_idx=frame_idx,
+            archetype=m_def.archetype,
+            emotion=m_def.emotion,
+            scale=scale
+        )
+        return True
+    except Exception:
+        return False
 
 
 def render_crayon_kinetic_shot(
