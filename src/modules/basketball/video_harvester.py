@@ -58,12 +58,27 @@ def extract_canonical_video_id(url_or_id: str) -> str:
     return url_or_id.strip()
 
 
+DYNAMIC_NEGATIVE_SEARCH_FILTER = " -2k -nba2k -gameplay -ps5 -xbox"
+
 def is_source_banned_for_project(source_id_or_path: str, athlete_key: str) -> bool:
     """Enforces strict cross-project asset isolation."""
     if not athlete_key or not source_id_or_path:
         return False
     key = athlete_key.lower()
     src_str = str(source_id_or_path).lower()
+
+    # Derek Fisher harici sporcularda 2004 Spurs / Fisher spesifik varlıklar ASLA kullanılamaz
+    if "fisher" not in key:
+        fisher_spurs_terms = ["spurs", "fisher", "derek", "sbc_center", "2004_playoffs", "lakers_vs_spurs", "san_antonio", "trent_tucker"]
+        if any(term in src_str for term in fisher_spurs_terms):
+            return True
+
+    # James Harden harici sporcularda Harden spesifik varlıklar ASLA kullanılamaz
+    if "harden" not in key:
+        harden_terms = ["harden", "wesley_johnson"]
+        if any(term in src_str for term in harden_terms):
+            return True
+
     for proj_key, banned_terms in BANNED_PROJECT_SOURCES.items():
         if proj_key in key or key in proj_key:
             for term in banned_terms:
@@ -374,7 +389,7 @@ class VideoHarvester:
 
             fname = f"dyn_{athlete_key}_{idx:02d}_{clip_label}.mp4"
             dyn_sources.append({
-                "url": f"ytsearch1:{search_q}",
+                "url": f"ytsearch1:{search_q}{DYNAMIC_NEGATIVE_SEARCH_FILTER}",
                 "format": "bestvideo[height<=720][ext=mp4]/bestvideo[height<=720]/best",
                 "sections": "*00:10-00:35",
                 "filename": fname,
@@ -395,7 +410,7 @@ class VideoHarvester:
         for e_idx, (e_query, e_label) in enumerate(extra_dyn_queries):
             fname = f"dyn_{athlete_key}_{start_idx + e_idx:02d}_{e_label}.mp4"
             dyn_sources.append({
-                "url": f"ytsearch1:{e_query}",
+                "url": f"ytsearch1:{e_query}{DYNAMIC_NEGATIVE_SEARCH_FILTER}",
                 "format": "bestvideo[height<=720][ext=mp4]/bestvideo[height<=720]/best",
                 "sections": "*00:10-00:35",
                 "filename": fname,

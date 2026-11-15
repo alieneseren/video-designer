@@ -95,6 +95,7 @@ class TestDeterministicGates(unittest.TestCase):
             "outdoor painted concrete basketball court",
             "outdoor streetball court",
             "close up sneakers on outdoor court",
+            "NBA 2K video game gameplay with player indicator circle and shot meter HUD",
             "football or soccer stadium",
             "athletics running track",
             "players standing on bench dead ball",
@@ -780,6 +781,12 @@ class TestDeterministicGates(unittest.TestCase):
         # Meşru ve tarafsız varlıklar yasaklanmaz
         self.assertFalse(is_source_banned_for_project("nba_neutral_action.mp4", "james_harden"))
         self.assertFalse(is_source_banned_for_project("nba_neutral_action.mp4", "derek_fisher"))
+
+        # Nikola Jokic (dinamik sporcu) için Fisher/Spurs ve Harden varlıkları yasaklıdır
+        self.assertTrue(is_source_banned_for_project("photo_003_sbc_center.jpg", "nikola_jokic"))
+        self.assertTrue(is_source_banned_for_project("broll_court_action_san_antonio_arena.jpg", "nikola_jokic"))
+        self.assertTrue(is_source_banned_for_project("harden_ankle_breaker.jpg", "nikola_jokic"))
+        self.assertFalse(is_source_banned_for_project("nba_neutral_action.mp4", "nikola_jokic"))
 
 
 if __name__ == "__main__":

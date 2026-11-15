@@ -38,6 +38,7 @@ NEGATIVE_DOMAIN_LABELS = [
     "outdoor painted concrete basketball court",
     "outdoor streetball court",
     "close up sneakers on outdoor court",
+    "NBA 2K video game gameplay with player indicator circle and shot meter HUD",
     "football or soccer stadium",
     "athletics running track",
     "players standing on bench dead ball",
