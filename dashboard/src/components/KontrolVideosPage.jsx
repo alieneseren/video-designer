@@ -20,7 +20,11 @@ import {
   ChevronDown,
   ChevronUp,
   Tag,
-  AlertCircle
+  AlertCircle,
+  RotateCcw,
+  Cpu,
+  Server,
+  X
 } from "lucide-react";
 
 export default function KontrolVideosPage({ onNavigateUpload }) {
@@ -34,10 +38,38 @@ export default function KontrolVideosPage({ onNavigateUpload }) {
   const [toastMessage, setToastMessage] = useState(null);
   const [expandedDescriptions, setExpandedDescriptions] = useState({});
   const [activeVideoPlayer, setActiveVideoPlayer] = useState({});
+  const [reproduceModalVideo, setReproduceModalVideo] = useState(null);
+  const [reproducingKey, setReproducingKey] = useState(null);
 
   const showToast = (msg, type = "success") => {
     setToastMessage({ text: msg, type });
     setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // Videoyu Yerelde veya Sunucuda Yeniden Üret
+  const handleReproduceVideo = async (channelId, folderName, mode, videoTitle) => {
+    const key = `${channelId}/${folderName}`;
+    setReproducingKey(key);
+    try {
+      const res = await fetch("/api/kontrol/reproduce", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel_id: channelId, folder_name: folderName, mode })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const modeText = mode === "local" ? "Yerelde (Mac / M4)" : "Sunucuda (Cloud Worker)";
+        showToast(`"${videoTitle || folderName}" için ${modeText} yeniden üretim başlatıldı!`);
+        setReproduceModalVideo(null);
+      } else {
+        throw new Error(data.detail || data.message || "Yeniden üretim başlatılamadı.");
+      }
+    } catch (err) {
+      console.error("[Reproduce Video] Hata:", err);
+      showToast(err.message, "error");
+    } finally {
+      setReproducingKey(null);
+    }
   };
 
   const fetchKontrolVideos = useCallback(async () => {
@@ -484,6 +516,7 @@ export default function KontrolVideosPage({ onNavigateUpload }) {
                 <div style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
                   {channel.videos.map(video => {
                     const isApproving = actionLoadingFolder === `${channel.channel_id}/${video.folder_name}`;
+                    const isReproducing = reproducingKey === `${channel.channel_id}/${video.folder_name}`;
                     const isPlayerActive = activeVideoPlayer[video.folder_name];
                     const isDescExpanded = expandedDescriptions[video.folder_name];
 
@@ -736,40 +769,80 @@ export default function KontrolVideosPage({ onNavigateUpload }) {
                           )}
                         </div>
 
-                        {/* Sağ Aksiyon Alanı: 'Kontrolden Geçti' Butonu */}
+                        {/* Sağ Aksiyon Alanı: 'Kontrolden Geçti' ve 'Yeniden Üret' Butonları */}
                         <div style={{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0, alignItems: "flex-end" }}>
-                          <button
-                            className="btn btn-sm"
-                            style={{
-                              background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-                              border: "none",
-                              color: "#fff",
-                              fontWeight: 700,
-                              fontSize: 12.5,
-                              padding: "8px 16px",
-                              borderRadius: 8,
-                              boxShadow: "0 4px 14px rgba(16, 185, 129, 0.35)",
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 7,
-                              cursor: "pointer"
-                            }}
-                            onClick={() => handleApproveVideo(channel.channel_id, video.folder_name, video.title)}
-                            disabled={isApproving}
-                            title="Bu videoyu onayla ve doğrudan yüklenecek/ klasörüne taşı"
-                          >
-                            {isApproving ? (
-                              <>
-                                <RefreshCw size={14} className="spin" />
-                                <span>Aktarılıyor...</span>
-                              </>
-                            ) : (
-                              <>
-                                <CheckCircle2 size={16} />
-                                <span>Kontrolden Geçti</span>
-                              </>
-                            )}
-                          </button>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <button
+                              className="btn btn-sm"
+                              style={{
+                                background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                                border: "none",
+                                color: "#fff",
+                                fontWeight: 700,
+                                fontSize: 12.5,
+                                padding: "8px 14px",
+                                borderRadius: 8,
+                                boxShadow: "0 4px 14px rgba(16, 185, 129, 0.35)",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 6,
+                                cursor: "pointer"
+                              }}
+                              onClick={() => handleApproveVideo(channel.channel_id, video.folder_name, video.title)}
+                              disabled={isApproving || isReproducing}
+                              title="Bu videoyu onayla ve doğrudan yüklenecek/ klasörüne taşı"
+                            >
+                              {isApproving ? (
+                                <>
+                                  <RefreshCw size={14} className="spin" />
+                                  <span>Aktarılıyor...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle2 size={15} />
+                                  <span>Kontrolden Geçti</span>
+                                </>
+                              )}
+                            </button>
+
+                            <button
+                              className="btn btn-sm"
+                              style={{
+                                background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+                                border: "none",
+                                color: "#fff",
+                                fontWeight: 700,
+                                fontSize: 12.5,
+                                padding: "8px 14px",
+                                borderRadius: 8,
+                                boxShadow: "0 4px 14px rgba(99, 102, 241, 0.3)",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 6,
+                                cursor: "pointer"
+                              }}
+                              onClick={() => setReproduceModalVideo({
+                                channelId: channel.channel_id,
+                                channelName: channel.channel_name,
+                                folderName: video.folder_name,
+                                title: video.title
+                              })}
+                              disabled={isApproving || isReproducing}
+                              title="Bu videoyu yerelde veya sunucuda yeniden üret"
+                            >
+                              {isReproducing ? (
+                                <>
+                                  <RefreshCw size={14} className="spin" />
+                                  <span>Başlatılıyor...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <RotateCcw size={15} />
+                                  <span>Yeniden Üret</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
 
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <button
@@ -800,6 +873,188 @@ export default function KontrolVideosPage({ onNavigateUpload }) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Yeniden Üretim Seçim Modalı (Yerelde mi Sunucuda mı?) */}
+      {reproduceModalVideo && (
+        <div style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: "rgba(0, 0, 0, 0.75)",
+          backdropFilter: "blur(6px)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 9999,
+          padding: 20
+        }}>
+          <div style={{
+            background: "var(--card-bg, #18181b)",
+            border: "1px solid rgba(255, 255, 255, 0.12)",
+            borderRadius: 16,
+            width: "100%",
+            maxWidth: 540,
+            padding: 24,
+            boxShadow: "0 20px 40px rgba(0,0,0,0.6)",
+            position: "relative"
+          }}>
+            {/* Header */}
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 16 }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <span style={{
+                    background: "rgba(99, 102, 241, 0.15)",
+                    color: "#818cf8",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: "2px 8px",
+                    borderRadius: 6
+                  }}>
+                    {reproduceModalVideo.channelName}
+                  </span>
+                </div>
+                <h3 style={{ fontSize: 17, fontWeight: 700, margin: 0, color: "#fff" }}>
+                  Videoyu Yeniden Üret
+                </h3>
+                <p style={{
+                  fontSize: 13,
+                  color: "var(--text-muted, #a1a1aa)",
+                  margin: "4px 0 0",
+                  maxWidth: 440,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap"
+                }}>
+                  {reproduceModalVideo.title || reproduceModalVideo.folderName}
+                </p>
+              </div>
+              <button
+                onClick={() => setReproduceModalVideo(null)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--text-muted, #a1a1aa)",
+                  cursor: "pointer",
+                  padding: 4,
+                  borderRadius: 6
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ fontSize: 13, color: "var(--text-muted, #a1a1aa)", marginBottom: 18 }}>
+              Üretimin nerede gerçekleştirileceğini seçin:
+            </div>
+
+            {/* 2 Seçenek Kartı */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {/* Seçenek 1: Yerelde Üret */}
+              <div
+                onClick={() => !reproducingKey && handleReproduceVideo(reproduceModalVideo.channelId, reproduceModalVideo.folderName, "local", reproduceModalVideo.title)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 16,
+                  padding: "16px 18px",
+                  background: "rgba(255, 255, 255, 0.03)",
+                  border: "1px solid rgba(16, 185, 129, 0.25)",
+                  borderRadius: 12,
+                  cursor: reproducingKey ? "not-allowed" : "pointer",
+                  transition: "all 0.18s ease",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(16, 185, 129, 0.08)"; e.currentTarget.style.borderColor = "rgba(16, 185, 129, 0.5)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)"; e.currentTarget.style.borderColor = "rgba(16, 185, 129, 0.25)"; }}
+              >
+                <div style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 10,
+                  background: "linear-gradient(135deg, rgba(16,185,129,0.2), rgba(5,150,105,0.2))",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0
+                }}>
+                  <Cpu size={24} color="#10b981" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14.5, color: "#fff" }}>Yerelde Yeniden Üret</span>
+                    <span style={{ fontSize: 10, background: "rgba(16,185,129,0.15)", color: "#34d399", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Mac / M4</span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted, #a1a1aa)", lineHeight: 1.4 }}>
+                    Bu cihazın yerel işlemcisi (Remotion / SigLIP / Apple Silicon M4) ile hemen baştan üretilir.
+                  </p>
+                </div>
+                <ArrowRight size={18} style={{ color: "#10b981", flexShrink: 0 }} />
+              </div>
+
+              {/* Seçenek 2: Sunucuda Üret */}
+              <div
+                onClick={() => !reproducingKey && handleReproduceVideo(reproduceModalVideo.channelId, reproduceModalVideo.folderName, "server", reproduceModalVideo.title)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 16,
+                  padding: "16px 18px",
+                  background: "rgba(255, 255, 255, 0.03)",
+                  border: "1px solid rgba(59, 130, 246, 0.25)",
+                  borderRadius: 12,
+                  cursor: reproducingKey ? "not-allowed" : "pointer",
+                  transition: "all 0.18s ease",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(59, 130, 246, 0.08)"; e.currentTarget.style.borderColor = "rgba(59, 130, 246, 0.5)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.03)"; e.currentTarget.style.borderColor = "rgba(59, 130, 246, 0.25)"; }}
+              >
+                <div style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 10,
+                  background: "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(37,99,235,0.2))",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0
+                }}>
+                  <Server size={24} color="#3b82f6" />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14.5, color: "#fff" }}>Sunucuda Yeniden Üret</span>
+                    <span style={{ fontSize: 10, background: "rgba(59,130,246,0.15)", color: "#60a5fa", padding: "1px 6px", borderRadius: 4, fontWeight: 600 }}>Cloud Worker</span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: 12, color: "var(--text-muted, #a1a1aa)", lineHeight: 1.4 }}>
+                    Uzak GPU worker sunucusuna aktarılır. Bulutta render edilip bitince otomatik kontrol klasörüne indirilir.
+                  </p>
+                </div>
+                <ArrowRight size={18} style={{ color: "#3b82f6", flexShrink: 0 }} />
+              </div>
+            </div>
+
+            {reproducingKey && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 16, color: "#818cf8", fontSize: 12.5 }}>
+                <RefreshCw size={14} className="spin" />
+                <span>İşlem başlatılıyor, lütfen bekleyin...</span>
+              </div>
+            )}
+
+            {/* Footer */}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 20 }}>
+              <button
+                className="btn btn-sm btn-ghost"
+                style={{ fontSize: 12.5 }}
+                onClick={() => setReproduceModalVideo(null)}
+                disabled={!!reproducingKey}
+              >
+                Vazgeç
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

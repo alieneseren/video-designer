@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 from datetime import datetime
 from urllib.parse import unquote
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
 from channel_manager import ChannelManager, get_localized_metadata, is_bogus_fallback
@@ -728,6 +728,11 @@ class KontrolApproveAllPayload(BaseModel):
 class KontrolOpenFolderPayload(BaseModel):
     folder_path: str
 
+class KontrolReproducePayload(BaseModel):
+    channel_id: str
+    folder_name: str
+    mode: str = "local"  # "local" or "server"
+
 
 def _get_output_path() -> Path:
     """Proje kök dizinindeki output klasörünü güvenilir şekilde döner."""
@@ -990,6 +995,190 @@ def open_kontrol_folder(payload: KontrolOpenFolderPayload):
         subprocess.run(["open", str(p)])
         return {"success": True}
     raise HTTPException(status_code=404, detail="Klasör bulunamadı")
+
+
+@router.post("/api/kontrol/reproduce")
+def reproduce_kontrol_video(payload: KontrolReproducePayload, background_tasks: BackgroundTasks):
+    """
+    Kontrol klasöründeki bir videoyu yerelde (Apple Silicon M4) veya sunucuda (Cloud Worker)
+    baştan yeniden üretir.
+    """
+    output_dir = _get_output_path()
+    folder_path = (output_dir / payload.channel_id / "kontrol" / payload.folder_name).resolve()
+
+    if not folder_path.exists() or not folder_path.is_dir():
+        raise HTTPException(status_code=404, detail=f"Kontrol klasörü bulunamadı: {payload.folder_name}")
+
+    meta = _parse_metadata(folder_path)
+    extra = {}
+    for info_name in ["video_info.json", "metadata.json"]:
+        ip = folder_path / info_name
+        if ip.exists():
+            try:
+                data = json.loads(ip.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    extra.update(data)
+            except Exception:
+                pass
+
+    # İş ID'sini tespit et
+    job_id = meta.get("job_id") or extra.get("job_id")
+    if not job_id:
+        m = re.search(r"(exec_mat_[A-Za-z0-9_]+)", payload.folder_name)
+        job_id = m.group(1) if m else payload.folder_name
+
+    row_id = str(meta.get("row_id") or extra.get("row_id") or "")
+    title = meta.get("title") or extra.get("title") or payload.folder_name
+    topic = meta.get("topic") or title
+    voice_clone_id = meta.get("voice_clone_id") or extra.get("voice_clone_id") or "vc_1792868444"
+
+    from core.state import execution_manager
+    exec_id = f"exec_{payload.channel_id}_reproduce_{int(datetime.now().timestamp())}"
+
+    # 1. YERELDE YENİDEN ÜRETİM (Local / Apple Silicon M4 / Remotion)
+    if payload.mode == "local":
+        is_basketball = payload.channel_id == "thebasketballshows" or "basketball" in payload.channel_id.lower() or any(
+            k in (payload.folder_name + " " + title).lower() for k in ["jokic", "fisher", "harden", "nba"]
+        )
+
+        if is_basketball:
+            manifest_file = folder_path / "timeline_manifest.json"
+            athlete_key = ""
+            if manifest_file.exists():
+                try:
+                    m_data = json.loads(manifest_file.read_text(encoding="utf-8"))
+                    athlete_key = m_data.get("athlete_key", "")
+                except Exception:
+                    pass
+
+            if not athlete_key:
+                f_lower = (payload.folder_name + " " + title).lower()
+                if "jokic" in f_lower or "nikola" in f_lower:
+                    athlete_key = "nikola_jokic"
+                elif "fisher" in f_lower or "derek" in f_lower:
+                    athlete_key = "derek_fisher"
+                elif "harden" in f_lower or "james" in f_lower:
+                    athlete_key = "james_harden"
+                else:
+                    athlete_key = "nikola_jokic"
+
+            execution_manager.create(
+                exec_id=exec_id,
+                channel_id=payload.channel_id,
+                total_steps=4,
+                metadata={
+                    "mode": "local",
+                    "channel_id": payload.channel_id,
+                    "folder_name": payload.folder_name,
+                    "title": title,
+                    "athlete_key": athlete_key,
+                    "job_id": job_id
+                }
+            )
+
+            def _local_basketball_worker():
+                try:
+                    execution_manager.update(exec_id, status="running", step=1, message="Basketball Engine 2.0 yerel üretim başlatılıyor...")
+                    from modules.basketball.orchestrator import BasketballOrchestrator
+                    orchestrator = BasketballOrchestrator(channel_id=payload.channel_id)
+                    execution_manager.update(exec_id, status="running", step=2, message="Kurgu, Remotion ve M4 RVC render ediliyor...")
+                    out_path = orchestrator.produce_video(
+                        job_id=payload.folder_name,
+                        athlete_key=athlete_key,
+                        topic=topic,
+                        voice_clone_id=voice_clone_id,
+                        force_rebuild=True,
+                        bypass_cache=True
+                    )
+                    execution_manager.update(exec_id, status="completed", step=4, message="Yerel üretim başarıyla tamamlandı!", result={"video_path": str(out_path)})
+                except Exception as e_b:
+                    print(f"❌ [KONTROL-REPRODUCE LOCAL BASKETBALL ERROR] {e_b}")
+                    execution_manager.fail(exec_id, str(e_b))
+
+            background_tasks.add_task(_local_basketball_worker)
+
+            return {
+                "success": True,
+                "mode": "local",
+                "exec_id": exec_id,
+                "message": f"'{title}' için yerel Basketball Engine 2.0 üretimi başlatıldı."
+            }
+
+        else:
+            execution_manager.create(
+                exec_id=exec_id,
+                channel_id=payload.channel_id,
+                total_steps=4,
+                metadata={
+                    "mode": "local",
+                    "channel_id": payload.channel_id,
+                    "folder_name": payload.folder_name,
+                    "title": title,
+                    "row_id": row_id
+                }
+            )
+
+            def _local_general_worker():
+                try:
+                    execution_manager.update(exec_id, status="running", step=1, message="Yerel video üretimi başlatılıyor...")
+                    from server import run_automation_task
+                    run_automation_task(
+                        channel_id=payload.channel_id,
+                        exec_id=exec_id,
+                        loop_count=1,
+                        loop_delay=10,
+                        force_row_id=row_id if row_id else None
+                    )
+                except Exception as e_g:
+                    print(f"❌ [KONTROL-REPRODUCE GENERAL LOCAL ERROR] {e_g}")
+                    execution_manager.fail(exec_id, str(e_g))
+
+            background_tasks.add_task(_local_general_worker)
+
+            return {
+                "success": True,
+                "mode": "local",
+                "exec_id": exec_id,
+                "message": f"'{title}' için yerel üretim başlatıldı."
+            }
+
+    # 2. SUNUCUDA YENİDEN ÜRETİM (Cloud Worker / Oracle Cloud)
+    elif payload.mode == "server":
+        try:
+            from remote_runner import RemoteRunner
+            runner = RemoteRunner()
+            if not runner.is_reachable():
+                raise HTTPException(status_code=503, detail="Oracle Cloud sunucusuna (132.226.187.103) SSH üzerinden ulaşılamadı.")
+
+            try:
+                server_res = runner.regenerate_server_video(payload.channel_id, job_id)
+                return {
+                    "success": True,
+                    "mode": "server",
+                    "message": f"'{title}' bulut worker kuyruğuna alındı ({server_res.get('new_job_id', job_id)}).",
+                    "server_response": server_res
+                }
+            except Exception as e_reg:
+                rc, out, _ = runner._run_ssh_cmd(f"test -f {runner.remote_dir}/jobs/{job_id}.json && echo 'EXISTS'")
+                if "EXISTS" in out:
+                    run_cmd = f"nohup bash {runner.remote_dir}/run_job.sh {runner.remote_dir}/jobs/{job_id}.json > {runner.remote_dir}/logs/{job_id}.log 2>&1 &"
+                    runner._run_ssh_cmd(run_cmd)
+                    return {
+                        "success": True,
+                        "mode": "server",
+                        "message": f"'{title}' sunucuda arka planda render edilmek üzere başlatıldı.",
+                        "job_id": job_id
+                    }
+                else:
+                    raise RuntimeError(f"Sunucuda iş materyali ({job_id}.json) bulunamadı: {e_reg}")
+
+        except HTTPException:
+            raise
+        except Exception as e_srv:
+            raise HTTPException(status_code=500, detail=f"Sunucu yeniden üretim hatası: {str(e_srv)}")
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Geçersiz mod: '{payload.mode}'. 'local' veya 'server' olmalıdır.")
 
 
 @router.post("/api/retention/clean")
