@@ -157,10 +157,13 @@ class BasketballOrchestrator:
             # 3. STRICT SUBJECT & DEAD-BALL REJECTION: Asla game action için target_subj = None yapma
             is_cand_science = is_query_science or any(kw in cand_source_id.lower() or kw in cand_p.stem.lower()
                              for kw in ["brain", "synapse", "neural", "optic", "telemetry", "sensor", "mocap", "science", "laboratory", "biomechanic"])
-            if is_cand_science:
+            is_query_broll = any(kw in target_query.lower() for kw in ["swish", "net", "hoop", "rim", "crowd", "spectator", "referee", "shot clock", "clock", "arena floor", "stadium"])
+            if "target_subject" in cand and cand["target_subject"] is None:
+                cand_subj = None
+            elif is_cand_science or is_query_broll:
                 cand_subj = None
             else:
-                cand_subj = athlete_key or "NBA basketball player dribbling shooting in arena"
+                cand_subj = cand.get("target_subject") or athlete_key or "NBA basketball player dribbling shooting in arena"
 
             vis_res = self.vision_verifier.verify_slice(
                 media_path=cand_p,
@@ -222,6 +225,50 @@ class BasketballOrchestrator:
 
         # 2. Otomatik Re-Query Döngüsü (Havuz boşaldığında veya tüm adaylar elendiğinde)
         logger.info(f"🔄 [Auto Re-Query Loop] Başlangıç havuzu yetersiz kaldı! Genişletilmiş arama döngüsü başlatılıyor ({athlete_key} | '{target_query}')...")
+
+        # Seviye 0.A: Yeni hasat edilmiş sporcu aksiyon klipleri (work_dir / action_clips)
+        work_clips_dir = work_dir / "action_clips"
+        if work_clips_dir.exists():
+            for c_file in sorted(work_clips_dir.glob("*.mp4")):
+                if c_file.stat().st_size < 10000:
+                    continue
+                c_sid = f"clip_{c_file.stem}"
+                if c_sid in locked_source_ids or (locked_file_names and c_file.name in locked_file_names):
+                    continue
+                c_hash = compute_file_md5(c_file)
+                if locked_file_hashes and c_hash and c_hash in locked_file_hashes:
+                    continue
+                res = _evaluate_candidate({
+                    "type": "video",
+                    "path": str(c_file),
+                    "source_video_id": c_sid,
+                    "target_subject": athlete_key
+                }, context_label="ReQuery-WorkActionClips")
+                if res:
+                    return res
+
+        # Seviye 0.B: Yeni hasat edilmiş dikey HD sporcu fotoğrafları (work_dir / photos)
+        work_photos_dir = work_dir / "photos"
+        if work_photos_dir.exists():
+            for p_file in sorted(work_photos_dir.glob("*.jpg")):
+                if p_file.name.startswith("requery_"):
+                    continue
+                if p_file.stat().st_size < 10000:
+                    continue
+                p_sid = f"work_photo_{p_file.stem}"
+                if p_sid in locked_source_ids or (locked_file_names and p_file.name in locked_file_names):
+                    continue
+                p_hash = compute_file_md5(p_file)
+                if locked_file_hashes and p_hash and p_hash in locked_file_hashes:
+                    continue
+                res = _evaluate_candidate({
+                    "type": "image",
+                    "path": str(p_file),
+                    "source_video_id": p_sid,
+                    "target_subject": athlete_key
+                }, context_label="ReQuery-WorkPhotos")
+                if res:
+                    return res
 
         # Seviye 1: Küratörlü sporcu fotoğrafları
         target_keys = [athlete_key] if athlete_key else ["james_harden", "derek_fisher"]
@@ -287,31 +334,35 @@ class BasketballOrchestrator:
                 b_hash = compute_file_md5(b_file)
                 if locked_file_hashes and b_hash and b_hash in locked_file_hashes:
                     continue
-                    out_broll_slice = work_dir / "action_clips" / f"requery_broll_{b_file.stem}.mp4"
-                    out_broll_slice.parent.mkdir(parents=True, exist_ok=True)
-                    if not out_broll_slice.exists() or out_broll_slice.stat().st_size < 10000:
-                        cmd = [
-                            "ffmpeg", "-y",
-                            "-ss", "00:00:01.0",
-                            "-i", str(b_file),
-                            "-t", "2.00",
-                            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,unsharp=5:5:1.2,fps=30",
-                            "-an", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
-                            str(out_broll_slice)
-                        ]
-                        subprocess.run(cmd, capture_output=True, timeout=20)
-                    cand_target = out_broll_slice if out_broll_slice.exists() and out_broll_slice.stat().st_size > 10000 else b_file
-                    res = _evaluate_candidate({
-                        "type": "video",
-                        "path": str(cand_target),
-                        "source_video_id": b_sid,
-                        "target_subject": None
-                    }, context_label="ReQuery-CuratedBroll")
-                    if res:
-                        return res
+                out_broll_slice = work_dir / "action_clips" / f"requery_broll_{b_file.stem}.mp4"
+                out_broll_slice.parent.mkdir(parents=True, exist_ok=True)
+                if not out_broll_slice.exists() or out_broll_slice.stat().st_size < 10000:
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-ss", "00:00:01.0",
+                        "-i", str(b_file),
+                        "-t", "2.00",
+                        "-vf", "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,unsharp=5:5:1.2,fps=30",
+                        "-an", "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
+                        str(out_broll_slice)
+                    ]
+                    subprocess.run(cmd, capture_output=True, timeout=20)
+                cand_target = out_broll_slice if out_broll_slice.exists() and out_broll_slice.stat().st_size > 10000 else b_file
+                res = _evaluate_candidate({
+                    "type": "video",
+                    "path": str(cand_target),
+                    "source_video_id": b_sid,
+                    "target_subject": None
+                }, context_label="ReQuery-CuratedBroll")
+                if res:
+                    return res
 
         # Seviye 3: VIDEO_SOURCES alternatif kesitleri
         sources = VIDEO_SOURCES.get(athlete_key, [])
+        if not sources and work_dir:
+            # Dinamik sporcular için raw_videos dizinindeki videoları tara
+            raw_vids = sorted((work_dir / "raw_videos").glob("*.mp4"))
+            sources = [{"filename": rv.name, "source_id": f"src_{rv.stem}"} for rv in raw_vids if rv.stat().st_size > 50000]
         if not sources and not athlete_key:
             sources = VIDEO_SOURCES.get("james_harden", []) + VIDEO_SOURCES.get("derek_fisher", [])
         for src in sources:
@@ -374,7 +425,16 @@ class BasketballOrchestrator:
                     h = compute_file_md5(p)
                     if h:
                         used_file_hashes.add(h)
-        work_path = work_dir or (PROJECT_ROOT / "output" / self.channel_id / "kontrol" / job_id / "basketball_v2_work")
+        work_path = work_dir or (PROJECT_ROOT / "output" / self.channel_id / "kontrol" / (job_id or "test_job") / "basketball_v2_work")
+        temp_dir = work_path / "_validator_3pt_frames"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        locked_hashes: List[Tuple[int, str, List[imagehash.ImageHash]]] = []
+        for idx, c in enumerate(cuts):
+            mp = c.get("media_path")
+            if mp and Path(mp).exists():
+                hl = get_3point_fingerprints(Path(mp), temp_dir)
+                if hl:
+                    locked_hashes.append((idx, Path(mp).name, hl))
 
         for cut in cuts:
             dur_f = cut["durationInFrames"]
@@ -434,11 +494,19 @@ class BasketballOrchestrator:
                             if b_neg_lbl in ["free throw lineup", "players standing on bench dead ball", "heavy motion blur whip pan", "amateur gym with brick wall"] and b_neg_sc >= b_pos_sc:
                                 continue
 
+                            cand_fps = get_3point_fingerprints(cand_p, temp_dir)
+                            if cand_fps and locked_hashes:
+                                min_dist = min(ch - lh for _, _, l_hashes in locked_hashes for ch in cand_fps for lh in l_hashes)
+                                if min_dist < 10:
+                                    continue
+
                             alt_asset = cand_item
                             used_sources.add(cand_sid)
                             used_file_names.add(cand_p.name)
                             if cand_h:
                                 used_file_hashes.add(cand_h)
+                            if cand_fps:
+                                locked_hashes.append((len(enforced), cand_p.name, cand_fps))
                             break
 
                         # 2. Havuz yetersizse re-query loop ile taze aday üret (Asla 'cut' duplicate etme!)
@@ -450,7 +518,7 @@ class BasketballOrchestrator:
                                 target_query=cut.get("concrete_visual_query", "professional NBA basketball game action"),
                                 target_type="video",
                                 locked_source_ids=used_sources,
-                                locked_hashes=[],
+                                locked_hashes=locked_hashes,
                                 candidate_pool=[],
                                 work_dir=work_path,
                                 locked_file_hashes=used_file_hashes,
@@ -465,6 +533,9 @@ class BasketballOrchestrator:
                                 rep_h = compute_file_md5(rep_p)
                                 if rep_h:
                                     used_file_hashes.add(rep_h)
+                                rep_fps = get_3point_fingerprints(rep_p, temp_dir)
+                                if rep_fps:
+                                    locked_hashes.append((len(enforced), rep_p.name, rep_fps))
                             else:
                                 # Öncelik 2: Fotoğraf adayı
                                 rep_img = self.select_replacement_asset(
@@ -472,7 +543,7 @@ class BasketballOrchestrator:
                                     target_query=cut.get("concrete_visual_query", "professional NBA basketball game action"),
                                     target_type="image",
                                     locked_source_ids=used_sources,
-                                    locked_hashes=[],
+                                    locked_hashes=locked_hashes,
                                     candidate_pool=[],
                                     work_dir=work_path,
                                     locked_file_hashes=used_file_hashes,
@@ -487,11 +558,40 @@ class BasketballOrchestrator:
                                     rep_img_h = compute_file_md5(rep_img_p)
                                     if rep_img_h:
                                         used_file_hashes.add(rep_img_h)
+                                    rep_img_fps = get_3point_fingerprints(rep_img_p, temp_dir)
+                                    if rep_img_fps:
+                                        locked_hashes.append((len(enforced), rep_img_p.name, rep_img_fps))
                                 else:
-                                    raise RuntimeError(
-                                        f"🚨 [Pacing Splitter] Cut {cut['id']} bölünürken geçerli taze görsel bulunamadı! "
-                                        f"Aynı klibe ({cut.get('media_path')}) fallback yapılması ve ikiz sahne üretilmesi engellendi."
+                                    # Öncelik 3: Sporcu genel aksiyon fotoğrafı (eğer aşırı spesifik sorgu eşleşmediyse)
+                                    clean_subj = subj.replace("_", " ").title() if subj else "NBA Basketball Player"
+                                    rep_img_gen = self.select_replacement_asset(
+                                        athlete_key=subj,
+                                        target_query=f"{clean_subj} NBA basketball game action on hardwood court",
+                                        target_type="image",
+                                        locked_source_ids=used_sources,
+                                        locked_hashes=locked_hashes,
+                                        candidate_pool=[],
+                                        work_dir=work_path,
+                                        locked_file_hashes=used_file_hashes,
+                                        locked_file_names=used_file_names
                                     )
+                                    if rep_img_gen:
+                                        alt_asset = rep_img_gen
+                                        rep_gen_p = Path(rep_img_gen["path"])
+                                        rep_gen_sid = rep_img_gen.get("source_video_id", rep_gen_p.stem)
+                                        used_sources.add(rep_gen_sid)
+                                        used_file_names.add(rep_gen_p.name)
+                                        rep_gen_h = compute_file_md5(rep_gen_p)
+                                        if rep_gen_h:
+                                            used_file_hashes.add(rep_gen_h)
+                                        rep_gen_fps = get_3point_fingerprints(rep_gen_p, temp_dir)
+                                        if rep_gen_fps:
+                                            locked_hashes.append((len(enforced), rep_gen_p.name, rep_gen_fps))
+                                    else:
+                                        raise RuntimeError(
+                                            f"🚨 [Pacing Splitter] Cut {cut['id']} bölünürken geçerli taze görsel bulunamadı! "
+                                            f"Aynı klibe ({cut.get('media_path')}) fallback yapılması ve ikiz sahne üretilmesi engellendi."
+                                        )
 
                         alt_path_str = alt_asset.get("path") or alt_asset.get("media_path") or cut.get("media_path")
                         alt_p = Path(alt_path_str)

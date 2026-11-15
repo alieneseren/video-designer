@@ -206,7 +206,12 @@ class BasketballVisionVerifier:
         if any(k in q_lower for k in SCIENCE_KEYWORDS) or any(k in q_lower for k in BROLL_GENERIC_KEYWORDS):
             return True, "", 0.0, 0.0
 
-        athlete_name = "James Harden #13" if "harden" in target_subject.lower() else "Derek Fisher #2" if "fisher" in target_subject.lower() else target_subject
+        if "harden" in target_subject.lower():
+            athlete_name = "James Harden #13"
+        elif "fisher" in target_subject.lower():
+            athlete_name = "Derek Fisher #2"
+        else:
+            athlete_name = target_subject.replace("_", " ").title()
 
         pos_prompt = f"{athlete_name} actively handling basketball dribbling driving or shooting in NBA game"
         offball_prompt = f"wide basketball arena view without {athlete_name} or off-ball role players standing on court"

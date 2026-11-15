@@ -22,7 +22,7 @@ from typing import List, Dict, Any, Tuple, Optional, Set
 import cv2
 
 from src.modules.basketball.vision_verifier import BasketballVisionVerifier
-from src.modules.basketball.asset_validator import measure_laplacian_sharpness, compute_file_md5
+from src.modules.basketball.asset_validator import measure_laplacian_sharpness, compute_file_md5, get_3point_fingerprints
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [%(levelname)s] %(message)s")
 logger = logging.getLogger("BasketballHarvester")
@@ -376,11 +376,32 @@ class VideoHarvester:
             dyn_sources.append({
                 "url": f"ytsearch1:{search_q}",
                 "format": "bestvideo[height<=720][ext=mp4]/bestvideo[height<=720]/best",
-                "sections": "*00:10-00:25",
+                "sections": "*00:10-00:35",
                 "filename": fname,
                 "source_id": f"src_dyn_{athlete_key}_{idx:02d}_{clip_label}",
                 "clips": [
                     ("00:00:02.0", 2.0, clip_label)
+                ]
+            })
+
+        # Çeşitlilik için ek dinamik kaynaklar (Farklı maçlar, olimpiyat, playoff)
+        extra_dyn_queries = [
+            (f"{clean_name} top 10 plays NBA HD", f"{athlete_key}_top_plays"),
+            (f"{clean_name} playoff highlights NBA HD", f"{athlete_key}_playoffs"),
+            (f"{clean_name} buzzer beater game winner NBA HD", f"{athlete_key}_buzzer_beater"),
+            (f"{clean_name} Olympic basketball Serbia highlights HD", f"{athlete_key}_olympics"),
+        ]
+        start_idx = len(video_items)
+        for e_idx, (e_query, e_label) in enumerate(extra_dyn_queries):
+            fname = f"dyn_{athlete_key}_{start_idx + e_idx:02d}_{e_label}.mp4"
+            dyn_sources.append({
+                "url": f"ytsearch1:{e_query}",
+                "format": "bestvideo[height<=720][ext=mp4]/bestvideo[height<=720]/best",
+                "sections": "*00:10-00:35",
+                "filename": fname,
+                "source_id": f"src_dyn_{athlete_key}_{start_idx + e_idx:02d}_{e_label}",
+                "clips": [
+                    ("00:00:02.0", 2.0, e_label)
                 ]
             })
 
@@ -476,7 +497,7 @@ class VideoHarvester:
                 if source_id in seen_source_ids or (canonical_id and canonical_id in seen_canonical_ids):
                     break
                 
-                candidate_offsets = [start_ts, "00:00:05.0", "00:00:08.0"] if "dyn_" in fname else [start_ts]
+                candidate_offsets = [start_ts, "00:00:04.0", "00:00:07.0", "00:00:10.0", "00:00:12.5"] if "dyn_" in fname else [start_ts]
 
                 for cur_ts in candidate_offsets:
                     out_clip = self.clips_dir / f"clip_{clip_counter:03d}_{clip_label}.mp4"
@@ -715,7 +736,7 @@ class VideoHarvester:
             for vid_name, vid_path in downloaded_videos.items():
                 if not vid_path.exists() or vid_path.stat().st_size < 100000:
                     continue
-                for sec in ["00:00:02.0", "00:00:05.0", "00:00:08.0", "00:00:11.0", "00:00:13.5"]:
+                for sec in ["00:00:01.0", "00:00:02.5", "00:00:04.0", "00:00:05.5", "00:00:07.0", "00:00:08.5", "00:00:10.0", "00:00:11.5", "00:00:13.0"]:
                     dest_p = self.photos_dir / f"frame_{f_idx:03d}_{vid_path.stem}.jpg"
                     vf = "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,unsharp=5:5:1.2"
                     cmd = [
@@ -735,33 +756,62 @@ class VideoHarvester:
                             photos_map[dest_p.name] = dest_p
                             unique_photos.add(dest_p)
                             f_idx += 1
-                    if len(unique_photos) >= 35:
+                    if len(unique_photos) >= 65:
                         break
-                if len(unique_photos) >= 35:
+                if len(unique_photos) >= 65:
                     break
 
-        # 2. sports_science ve court_action küratörlü arşivinden de ekle
-        unique_photos = set(photos_map.values())
-        if len(unique_photos) < 25:
-            for extra_sub in ["sports_science", "court_action"]:
-                extra_dir = PROJECT_ROOT / "assets" / "curated_sports" / "b_roll" / extra_sub
-                if extra_dir.exists():
-                    for p_extra in sorted(extra_dir.glob("*.jpg")):
-                        if is_source_banned_for_project(p_extra.name, athlete_key):
-                            continue
-                        dest_p = self.photos_dir / f"broll_{extra_sub}_{p_extra.name}"
-                        if not dest_p.exists():
-                            vf = "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,unsharp=5:5:1.2"
-                            cmd = [FFMPEG_BIN, "-y", "-i", str(p_extra), "-vf", vf, "-q:v", "2", str(dest_p)]
-                            subprocess.run(cmd, capture_output=True, timeout=15)
-                        if dest_p.exists() and dest_p.stat().st_size > 20000:
-                            w, h, lap = measure_laplacian_sharpness(dest_p)
-                            if lap >= 75.0:
-                                photos_map[dest_p.stem] = dest_p
-                                photos_map[dest_p.name] = dest_p
-                                unique_photos.add(dest_p)
-                        if len(unique_photos) >= 35:
-                            break
+        # 2. sports_science ve court_action küratörlü arşivini daima ekle (Bilim ve kort varlıkları bağımsızdır)
+        for extra_sub in ["sports_science", "court_action"]:
+            extra_dir = PROJECT_ROOT / "assets" / "curated_sports" / "b_roll" / extra_sub
+            if extra_dir.exists():
+                for p_extra in sorted(extra_dir.glob("*.jpg")):
+                    if is_source_banned_for_project(p_extra.name, athlete_key):
+                        continue
+                    dest_p = self.photos_dir / f"broll_{extra_sub}_{p_extra.name}"
+                    if not dest_p.exists():
+                        vf = "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,unsharp=5:5:1.2"
+                        cmd = [FFMPEG_BIN, "-y", "-i", str(p_extra), "-vf", vf, "-q:v", "2", str(dest_p)]
+                        subprocess.run(cmd, capture_output=True, timeout=15)
+                    if dest_p.exists() and dest_p.stat().st_size > 20000:
+                        w, h, lap = measure_laplacian_sharpness(dest_p)
+                        if lap >= 75.0:
+                            photos_map[dest_p.stem] = dest_p
+                            photos_map[dest_p.name] = dest_p
+                            photos_map[p_extra.stem] = dest_p
+                            photos_map[p_extra.name] = dest_p
+                            unique_photos.add(dest_p)
+
+        # 3. Dinamik Sporcular için Wikimedia Commons Otantik Fotoğraf Hasadı
+        curated_dir = Path(f"/Users/alienes/yt-oto-video/files/assets/curated_sports/athletes/{athlete_key}")
+        athlete_has_local = curated_dir.exists() and len(list(curated_dir.glob("*.jpg"))) >= 5
+        if not athlete_has_local:
+            try:
+                import urllib.request
+                from src.sports_shorts_engine import search_wikimedia_sports_media
+                clean_name = athlete_key.replace("_", " ").title()
+                wiki_urls = search_wikimedia_sports_media(f"{clean_name} basketball", limit=8)
+                for w_idx, w_url in enumerate(wiki_urls):
+                    dest_p = self.photos_dir / f"wiki_{athlete_key}_{w_idx:02d}.jpg"
+                    if not dest_p.exists() or dest_p.stat().st_size < 20000:
+                        clean_w_url = w_url.split("?")[0]
+                        req = urllib.request.Request(clean_w_url, headers={"User-Agent": "YtOtoVideoBot/1.0 (contact@alienes.com)"})
+                        raw_data = urllib.request.urlopen(req, timeout=10).read()
+                        temp_raw = self.photos_dir / f"_temp_wiki_{w_idx}.jpg"
+                        temp_raw.write_bytes(raw_data)
+                        vf = "scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,unsharp=5:5:1.2"
+                        cmd = [FFMPEG_BIN, "-y", "-i", str(temp_raw), "-vf", vf, "-q:v", "2", str(dest_p)]
+                        subprocess.run(cmd, capture_output=True, timeout=15)
+                        temp_raw.unlink(missing_ok=True)
+                    if dest_p.exists() and dest_p.stat().st_size > 20000:
+                        w, h, lap = measure_laplacian_sharpness(dest_p)
+                        if lap >= 75.0:
+                            photos_map[dest_p.stem] = dest_p
+                            photos_map[dest_p.name] = dest_p
+                            photos_map[f"{athlete_key}_wiki_{w_idx}"] = dest_p
+                            unique_photos.add(dest_p)
+            except Exception as e:
+                logger.warning(f"⚠️ [Wikimedia Hasadı] {athlete_key} fotoğrafları çekilemedi: {e}")
 
         logger.info(f"📸 Toplam {len(photos_map)//2} adet tam ekran dikey HD fotoğraf hazırlandı.")
         return photos_map
@@ -790,6 +840,9 @@ class VideoHarvester:
             clips_dict[Path(c["path"]).name] = c
 
         pool = []
+        pool_hashes: List[Tuple[str, List[Any]]] = []
+        temp_dir = self.work_dir / "_validator_3pt_frames"
+        temp_dir.mkdir(parents=True, exist_ok=True)
 
         storyboard = get_storyboard_for_athlete(athlete_key)
 
@@ -856,15 +909,24 @@ class VideoHarvester:
             used_md5s = {compute_file_md5(Path(item["path"])) for item in pool if Path(item["path"]).exists()}
 
             if resolved_item and Path(resolved_item["path"]).exists():
-                item_md5 = compute_file_md5(Path(resolved_item["path"]))
-                if resolved_item["path"] in used_paths or resolved_item.get("source_video_id") in used_sources or item_md5 in used_md5s:
+                r_p = Path(resolved_item["path"])
+                item_md5 = compute_file_md5(r_p)
+                r_fps = get_3point_fingerprints(r_p, temp_dir)
+                is_twin = False
+                if r_fps and pool_hashes:
+                    min_d = min(ch - lh for _, lh_list in pool_hashes for ch in r_fps for lh in lh_list)
+                    if min_d < 10:
+                        is_twin = True
+                if resolved_item["path"] in used_paths or resolved_item.get("source_video_id") in used_sources or item_md5 in used_md5s or is_twin:
                     logger.warning(
-                        f"⚠️ Storyboard varlığı ({resolved_item['name']}) havuzda zaten kullanılmış (veya MD5 ikizi)! "
+                        f"⚠️ Storyboard varlığı ({resolved_item['name']}) havuzda zaten kullanılmış (veya pHash ikizi)! "
                         f"Otomatik re-query devreye giriyor..."
                     )
                     resolved_item = None
                 else:
                     pool.append(resolved_item)
+                    if r_fps:
+                        pool_hashes.append((resolved_item["name"], r_fps))
 
             if not resolved_item:
                 logger.warning(f"⚠️ Storyboard varlığı bulunamadı: ({m_type}, {key}) - Otomatik re-query döngüsü başlatılıyor...")
@@ -877,6 +939,11 @@ class VideoHarvester:
                     if cand_c["path"] not in used_paths and cand_c["source_video_id"] not in used_sources and compute_file_md5(cand_cp) not in used_md5s:
                         if is_source_banned_for_project(cand_c["source_video_id"], athlete_key) or is_source_banned_for_project(cand_c["name"], athlete_key):
                             continue
+                        c_fps = get_3point_fingerprints(cand_cp, temp_dir)
+                        if c_fps and pool_hashes:
+                            min_d = min(ch - lh for _, lh_list in pool_hashes for ch in c_fps for lh in lh_list)
+                            if min_d < 10:
+                                continue
                         vis = self.vision_verifier.verify_slice(
                             media_path=cand_cp,
                             concrete_visual_query=concrete_query,
@@ -905,6 +972,11 @@ class VideoHarvester:
                         if p_str not in used_paths and p_sid not in used_sources and compute_file_md5(p_path) not in used_md5s:
                             if is_source_banned_for_project(p_sid, athlete_key) or is_source_banned_for_project(p_path.name, athlete_key):
                                 continue
+                            p_fps = get_3point_fingerprints(p_path, temp_dir)
+                            if p_fps and pool_hashes:
+                                min_d = min(ch - lh for _, lh_list in pool_hashes for ch in p_fps for lh in lh_list)
+                                if min_d < 10:
+                                    continue
                             w, h, lap = measure_laplacian_sharpness(p_path)
                             if lap >= 75.0 and (w == 0 or w >= 720) and (h == 0 or h >= 720):
                                 vis = self.vision_verifier.verify_slice(
@@ -935,6 +1007,9 @@ class VideoHarvester:
                 if replacement:
                     logger.info(f"✅ [Storyboard Re-Query Çözüldü] ({m_type}, {key}) yerine {replacement['name']} ({replacement['type']}) atandı.")
                     pool.append(replacement)
+                    rep_fps = get_3point_fingerprints(Path(replacement["path"]), temp_dir)
+                    if rep_fps:
+                        pool_hashes.append((replacement["name"], rep_fps))
                 else:
                     logger.warning(f"⚠️ [Storyboard Re-Query] ({m_type}, {key}) için onaylı alternatif bulunamadı, sahne atlanıyor.")
 
