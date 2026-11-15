@@ -24,7 +24,7 @@ import {
   RotateCcw
 } from "lucide-react";
 
-export default function AutomationPage({ channels = [], groups = [], onNavigateServerRender }) {
+export default function AutomationPage({ channels = [], groups = [], onNavigateServerRender, onNavigateKontrol }) {
   const [plans, setPlans] = useState([]);
   const [serverVideos, setServerVideos] = useState([]);
   const [queueStatus, setQueueStatus] = useState({ is_running: false, queue_count: 0, jobs_count: 0, connected: false });
@@ -117,6 +117,42 @@ export default function AutomationPage({ channels = [], groups = [], onNavigateS
       return matchesChannel && matchesSearch && matchesStatus;
     });
   }, [plans, selectedChannelId, searchQuery, statusFilter]);
+
+  // Canlı Üretim & Kuyruk İzleme Durumları
+  const activeRunningExecution = useMemo(() => {
+    if (queueStatus?.recent_executions) {
+      const running = queueStatus.recent_executions.find((e) => e.status === "running");
+      if (running) return running;
+    }
+    return null;
+  }, [queueStatus]);
+
+  const isServerOrLocalRunning = Boolean(queueStatus?.is_running || activeRunningExecution);
+
+  const activeJobTitle =
+    queueStatus?.active_job_details?.title ||
+    activeRunningExecution?.metadata?.title ||
+    queueStatus?.current_job ||
+    "Video Üretimi";
+
+  const activeJobChannel =
+    queueStatus?.active_job_details?.channel_id ||
+    activeRunningExecution?.metadata?.channel_id ||
+    activeRunningExecution?.channel_id ||
+    "";
+
+  const activeJobProgress =
+    queueStatus?.active_job_details?.progress ||
+    (activeRunningExecution ? (activeRunningExecution.step ? activeRunningExecution.step * 25 : 35) : 0);
+
+  const activeJobPhase =
+    queueStatus?.active_job_details?.message ||
+    activeRunningExecution?.message ||
+    queueStatus?.message ||
+    "İşlem devam ediyor...";
+
+  const activeMode =
+    activeRunningExecution?.metadata?.mode || (queueStatus?.is_running ? "server" : "local");
 
   // Tümünü seç / kaldır
   const handleToggleSelectAll = () => {
@@ -490,6 +526,235 @@ export default function AutomationPage({ channels = [], groups = [], onNavigateS
           </button>
         </div>
       )}
+
+      {/* ── CANLI ÜRETİM & BULUT KUYRUK MONİTÖRÜ ── */}
+      <div
+        className="card"
+        style={{
+          borderRadius: 16,
+          padding: 22,
+          background: isServerOrLocalRunning
+            ? "linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 27, 75, 0.9) 100%)"
+            : "linear-gradient(135deg, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.8) 100%)",
+          border: isServerOrLocalRunning
+            ? "1px solid rgba(99, 102, 241, 0.5)"
+            : "1px solid rgba(255, 255, 255, 0.08)",
+          boxShadow: isServerOrLocalRunning ? "0 8px 30px rgba(99, 102, 241, 0.25)" : "none",
+          marginBottom: 24,
+          position: "relative",
+          overflow: "hidden"
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: "50%",
+                background: isServerOrLocalRunning ? "#10b981" : "#64748b",
+                boxShadow: isServerOrLocalRunning ? "0 0 12px #10b981" : "none"
+              }}
+            />
+            <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: "#f8fafc", display: "flex", alignItems: "center", gap: 8 }}>
+              {isServerOrLocalRunning ? (
+                <>
+                  <span>⚡ Canlı Üretim Devam Ediyor</span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: 20,
+                      background: activeMode === "server" ? "rgba(59, 130, 246, 0.2)" : "rgba(16, 185, 129, 0.2)",
+                      color: activeMode === "server" ? "#60a5fa" : "#34d399",
+                      border: `1px solid ${activeMode === "server" ? "rgba(59, 130, 246, 0.3)" : "rgba(16, 185, 129, 0.3)"}`
+                    }}
+                  >
+                    {activeMode === "server" ? "☁️ Oracle Cloud Worker" : "💻 Yerel Mac / M4"}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span>💤 Üretim Hattı Boşta</span>
+                  <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 500 }}>Yeni görev bekleniyor</span>
+                </>
+              )}
+            </h3>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {onNavigateKontrol && (
+              <button
+                onClick={onNavigateKontrol}
+                className="btn btn-sm btn-ghost"
+                style={{
+                  fontSize: 12,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  color: "#34d399",
+                  background: "rgba(16, 185, 129, 0.1)"
+                }}
+              >
+                <CheckCircle2 size={14} />
+                <span>Kontroldeki Videolara Git</span>
+                <ArrowRight size={13} />
+              </button>
+            )}
+            <button
+              onClick={fetchData}
+              className="btn btn-sm btn-ghost"
+              style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 5, color: "var(--text-muted)" }}
+              title="Yenile"
+            >
+              <RefreshCw size={12} className={loading ? "spin" : ""} />
+            </button>
+          </div>
+        </div>
+
+        {/* Aktif İş Detayı */}
+        {isServerOrLocalRunning ? (
+          <div>
+            <div
+              style={{
+                background: "rgba(0, 0, 0, 0.35)",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                borderRadius: 12,
+                padding: "16px 18px",
+                marginBottom: 14
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {activeJobChannel && (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        padding: "2px 8px",
+                        borderRadius: 6,
+                        background: "rgba(99, 102, 241, 0.2)",
+                        color: "#a5b4fc"
+                      }}
+                    >
+                      {activeJobChannel}
+                    </span>
+                  )}
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>
+                    {activeJobTitle}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#38bdf8" }}>
+                  %{activeJobProgress > 0 ? activeJobProgress : 35}
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              <div
+                style={{
+                  width: "100%",
+                  height: 8,
+                  borderRadius: 4,
+                  background: "rgba(255, 255, 255, 0.1)",
+                  overflow: "hidden",
+                  marginBottom: 10
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${Math.max(activeJobProgress > 0 ? activeJobProgress : 35, 12)}%`,
+                    background: "linear-gradient(90deg, #6366f1 0%, #38bdf8 50%, #34d399 100%)",
+                    borderRadius: 4,
+                    transition: "width 0.4s ease"
+                  }}
+                />
+              </div>
+
+              {/* Aşama Bilgisi */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12.5, color: "var(--text-muted)" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <RefreshCw size={13} className="spin" style={{ color: "#38bdf8" }} />
+                  <strong style={{ color: "#e2e8f0" }}>Mevcut Aşama:</strong> {activeJobPhase}
+                </span>
+                <span style={{ color: "#94a3b8", fontSize: 11.5 }}>
+                  {activeMode === "server"
+                    ? "Render tamamlandığında doğrudan 'kontrol/' klasörüne indirilecek."
+                    : "Yerel M4 Remotion & RVC motoru çalışıyor."}
+                </span>
+              </div>
+            </div>
+
+            {/* Kuyrukta Bekleyenler Listesi */}
+            {queueStatus?.queued_jobs && queueStatus.queued_jobs.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Sıradaki İşler ({queueStatus.queued_jobs.length})
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {queueStatus.queued_jobs.map((qj, idx) => (
+                    <div
+                      key={qj.job_id || idx}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "8px 12px",
+                        background: "rgba(255, 255, 255, 0.03)",
+                        borderRadius: 8,
+                        fontSize: 12,
+                        border: "1px solid rgba(255, 255, 255, 0.05)"
+                      }}
+                    >
+                      <span style={{ display: "flex", alignItems: "center", gap: 8, color: "#cbd5e1" }}>
+                        <span style={{ color: "var(--text-muted)", fontWeight: 700 }}>#{idx + 1}</span>
+                        {qj.channel_id && (
+                          <span style={{ fontSize: 10, padding: "1px 5px", background: "rgba(255,255,255,0.08)", borderRadius: 4 }}>
+                            {qj.channel_id}
+                          </span>
+                        )}
+                        <span>{qj.title}</span>
+                      </span>
+                      <span style={{ color: "#fbbf24", fontSize: 11, fontWeight: 600 }}>Sırada Bekliyor</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Boşta Durumu ve Son Tamamlanan Görev */
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
+            <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+              {queueStatus?.recent_executions && queueStatus.recent_executions.length > 0 ? (
+                (() => {
+                  const last = queueStatus.recent_executions[0];
+                  return (
+                    <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <CheckCircle2 size={16} color="#10b981" />
+                      <span>
+                        Son İşlem: <strong style={{ color: "#e2e8f0" }}>{last.metadata?.title || last.exec_id}</strong> —{" "}
+                        <span style={{ color: last.status === "completed" ? "#34d399" : "#f87171" }}>
+                          {last.status === "completed" ? "Başarıyla Tamamlandı (Kontrol klasörüne aktarıldı)" : last.message}
+                        </span>
+                      </span>
+                    </span>
+                  );
+                })()
+              ) : (
+                <span>Şu anda sunucuda veya yerelde koşan aktif bir render görevi bulunmuyor.</span>
+              )}
+            </div>
+
+            {queueStatus?.jobs_count > 0 && (
+              <span style={{ fontSize: 11.5, color: "#64748b" }}>
+                Toplam {queueStatus.jobs_count} adet iş arşivi sunucuda hazır.
+              </span>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* ── BÖLÜM 1: ÜRETİLMEMİŞ PLANLAR VE BULUT KUYRUĞUNA GÖNDERME ── */}
       <div

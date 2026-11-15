@@ -5066,6 +5066,21 @@ def get_automation_queue_status():
             return {"connected": False, "is_running": False, "queue_count": 0, "jobs_count": 0}
         st = runner.get_queue_status()
         st["connected"] = True
+
+        # Yerel ve sunucu son/aktif görevlerini ekle
+        try:
+            from core.state import execution_manager
+            all_execs = execution_manager.list_all()
+            recent_execs = []
+            for eid, ed in sorted(all_execs.items(), key=lambda x: str(x[1].get("updated_at") or x[1].get("created_at") or ""), reverse=True):
+                recent_execs.append({
+                    "exec_id": eid,
+                    **ed
+                })
+            st["recent_executions"] = recent_execs[:10]
+        except Exception:
+            st["recent_executions"] = []
+
         return st
     except Exception as e:
         return {"connected": False, "error": str(e), "is_running": False, "queue_count": 0}

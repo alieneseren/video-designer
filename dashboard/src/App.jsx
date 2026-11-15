@@ -9432,6 +9432,7 @@ export default function App() {
                    channels={channels}
                    groups={groups}
                    onNavigateServerRender={() => setActivePage("server_render")}
+                   onNavigateKontrol={() => setActivePage("kontrol_videos")}
                  />
                ) :
                activePage === "materials" ? (

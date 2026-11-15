@@ -1188,12 +1188,12 @@ print(json.dumps({
         return result
 
     def get_queue_status(self) -> Dict[str, Any]:
-        """Sunucu sıralı görev kuyruğu durumunu (kalan iş, aktif çalışan, vb.) sorgular."""
+        """Sunucu sıralı görev kuyruğu durumunu (kalan iş, aktif çalışan, aşamalar vb.) sorgular."""
         py_cmd = f"""python3 -c "
 import os, json, glob
 base = '{self.remote_dir}'
 status_path = os.path.join(base, 'queue_status.json')
-q_files = glob.glob(os.path.join(base, 'queue', '*.json'))
+q_files = sorted(glob.glob(os.path.join(base, 'queue', '*.json')), key=os.path.getmtime)
 j_files = glob.glob(os.path.join(base, 'jobs', '*.json'))
 info = {{}}
 if os.path.exists(status_path):
@@ -1201,10 +1201,43 @@ if os.path.exists(status_path):
         info = json.loads(open(status_path, 'r', encoding='utf-8').read())
     except Exception:
         pass
+
+cur_job = info.get('current_job')
+active_details = {{}}
+if cur_job:
+    st_file = os.path.join(base, 'jobs', f'{{cur_job}}_status.json')
+    job_file = os.path.join(base, 'jobs', f'{{cur_job}}.json')
+    if os.path.exists(st_file):
+        try:
+            active_details.update(json.loads(open(st_file, 'r', encoding='utf-8').read()))
+        except Exception:
+            pass
+    if os.path.exists(job_file) and not active_details.get('title'):
+        try:
+            jd = json.loads(open(job_file, 'r', encoding='utf-8').read())
+            active_details['title'] = jd.get('script_data', {{}}).get('title') or jd.get('topic') or cur_job
+            active_details['channel_id'] = jd.get('channel_id')
+        except Exception:
+            pass
+info['active_job_details'] = active_details
+
+queued_list = []
+for qf in q_files[:8]:
+    try:
+        qd = json.loads(open(qf, 'r', encoding='utf-8').read())
+        queued_list.append({{
+            'job_id': qd.get('job_id', os.path.basename(qf)),
+            'title': qd.get('script_data', {{}}).get('title') or qd.get('topic') or os.path.basename(qf),
+            'channel_id': qd.get('channel_id', '')
+        }})
+    except Exception:
+        queued_list.append({{'job_id': os.path.basename(qf), 'title': os.path.basename(qf)}})
+info['queued_jobs'] = queued_list
+
 info['queue_count'] = len(q_files)
 info['jobs_count'] = len(j_files)
-info['queue_files'] = [os.path.basename(f) for f in sorted(q_files)]
-print(json.dumps(info))
+info['queue_files'] = [os.path.basename(f) for f in q_files]
+print(json.dumps(info, ensure_ascii=False))
 " """
         rc, stdout, _ = self._run_ssh_cmd(py_cmd, timeout=10)
         if rc == 0 and stdout.strip():
@@ -1213,7 +1246,6 @@ print(json.dumps(info))
                 # Runner sürecinin PID kontrolü (bracket trick ile grep'in kendi sürecini eşleştirmesini önle)
                 rc_p, p_out, _ = self._run_ssh_cmd("ps -eo pid,args | grep '[q]ueue_runner.py' || true", timeout=5)
                 has_proc = bool(rc_p == 0 and p_out.strip())
-                # Eğer süreç çalışmıyorsa veya kuyruk boşsa ve aktif iş yoksa is_running False olmalıdır
                 if not has_proc or (res.get("queue_count", 0) == 0 and not res.get("current_job")):
                     res["is_running"] = False
                 else:
